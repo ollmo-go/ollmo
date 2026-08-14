@@ -1,0 +1,59 @@
+# Version control
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Env files (should be injected at runtime, not baked into image)
+.env
+.env.local
+*.env.local
+
+# Docker
+docker-compose.yml
+Dockerfile
+*.Dockerfile
+.dockerignore
+
+# Docs
+docs/
+README.md
+LICENSE
+
+# Go build artifacts
+server/bin/
+server/tmp/
+server/ollmo
+server/ollmo.exe
+*.exe
+*.test
+*.out
+
+# Node
+web/node_modules/
+web/.next/
+web/out/
+web/build/
+web/.turbo/
+web/npm-debug.log*
+web/yarn-error.log*
+
+# Data & logs
+data/
+volumes/
+mysql-data/
+milvus-data/
+minio-data/
+redis-data/
+etcd-data/
+*.log
+logs/
+
+# Misc
+.DS_Store
+Thumbs.db
+dist/

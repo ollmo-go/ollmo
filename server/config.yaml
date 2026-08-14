@@ -1,0 +1,44 @@
+server:
+  port: "8080"
+  env: development
+  cors_origins: "http://localhost:3001, http://localhost:3000"
+
+mysql:
+  host: localhost
+  port: "3306"
+  user: ollmo
+  password: ollmo_dev_pwd
+  database: ollmo
+
+redis:
+  host: localhost
+  port: "6379"
+
+minio:
+  endpoint: localhost:9000
+  access_key: minioadmin
+  secret_key: minioadmin
+  use_ssl: false
+  bucket: ollmo
+
+milvus:
+  host: localhost
+  port: "19530"
+
+mineru:
+  endpoint: http://localhost:8000
+
+auth:
+  jwt_secret: change_me_to_a_long_random_string_in_production
+  jwt_expire_hours: 168
+
+quota:
+  free:
+    doc_quota: 100
+    vector_quota: 10000
+  pro:
+    doc_quota: 1000
+    vector_quota: 100000
+  enterprise:
+    doc_quota: 10000
+    vector_quota: 1000000
