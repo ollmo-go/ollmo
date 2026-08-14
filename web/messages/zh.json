@@ -140,7 +140,8 @@
     "stats_total": "总计",
     "stats_tokens": "Token",
     "stats_prompt": "输入",
-    "stats_completion": "输出"
+    "stats_completion": "输出",
+    "ai_disclaimer": "内容由 AI 生成，请仔细甄别"
   },
   "llm": {
     "title": "模型配置",

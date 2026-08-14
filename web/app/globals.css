@@ -58,6 +58,19 @@
   }
 }
 
+/* Chat streaming cursor: rendered inline at the end of the last markdown
+   block so it follows the text as tokens arrive. */
+.chat-markdown.streaming > :last-child::after {
+  content: "▍";
+  margin-left: 1px;
+  animation: cursor-blink 1s steps(2, start) infinite;
+}
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 /* Agent canvas: execution trace highlight */
 .agent-trace-active {
   filter: drop-shadow(0 0 6px hsl(var(--primary) / 0.6));

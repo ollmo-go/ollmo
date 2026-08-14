@@ -123,13 +123,19 @@ export function MessageBubble({
               <div className="whitespace-pre-wrap">{message.content}</div>
             )
           ) : (
-            <div className="chat-markdown">
+            <div className={`chat-markdown ${streaming && message.content ? "streaming" : ""}`}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                 {message.content}
               </ReactMarkdown>
             </div>
           )}
-          {streaming && <span className="inline-block w-1 h-4 ml-0.5 bg-current animate-pulse align-middle" />}
+          {streaming && !message.content && !hasReasoning && (
+            <span className="inline-flex items-center gap-1 py-1.5" aria-label={t("chat.thinking")}>
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-40 animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-40 animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-40 animate-bounce" style={{ animationDelay: "300ms" }} />
+            </span>
+          )}
         </div>
         {!isUser && citations.length > 0 && (
           <div className="mt-2 pt-2 border-t border-border/40 text-xs space-y-0.5">

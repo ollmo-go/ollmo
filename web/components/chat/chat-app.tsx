@@ -609,7 +609,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                       tenant_id: "",
                       conversation_id: selectedConv,
                       role: "assistant",
-                      content: streamedText + (streamedText ? "" : "…"),
+                      content: streamedText,
                       reasoning: streamedThinking || undefined,
                       citations: pendingCitations.length ? JSON.stringify(pendingCitations) : "",
                       created_at: new Date().toISOString(),
@@ -621,7 +621,12 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                 )}
               </div>
             </div>
-            <div className="pt-3 max-w-3xl mx-auto w-full">{chatInput}</div>
+            <div className="pt-3 max-w-3xl mx-auto w-full">
+              {chatInput}
+              <p className="pt-2 text-center text-xs text-muted-foreground/60 select-none">
+                {t("chat.ai_disclaimer")}
+              </p>
+            </div>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center max-w-3xl mx-auto w-full">
