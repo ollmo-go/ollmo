@@ -21,6 +21,10 @@ English | [简体中文](README.zh-CN.md)
 
 ---
 
+![ollmo agent](agent-canvas.png)
+
+![ollmo chat](chat.png)
+
 ## Why ollmo
 
 Most AI application platforms bury you in workflows, nodes, plugins — dozens of concepts and hundreds of settings before the AI can actually help. AI should make things simpler, not the other way around.

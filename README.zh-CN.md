@@ -21,6 +21,10 @@
 
 ---
 
+![ollmo agent](agent-canvas.png)
+
+![ollmo chat](chat.png)
+
 ## 为什么做 ollmo
 
 市面上的 AI 应用编排平台：工作流、节点、插件，几十个概念、上百项配置。想让 AI 帮个忙，得先花好几天学会一套复杂的系统。AI 本该让事情变简单，结果却背道而驰。
