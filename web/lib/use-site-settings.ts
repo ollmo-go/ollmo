@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import useSWR from "swr";
 import { api } from "./api";
 
@@ -30,13 +31,20 @@ export function useSiteName() {
 
 // SiteTitle keeps the browser tab title in sync with the configured site
 // name and description: "name - description" when both are set, otherwise
-// just the name.
+// just the name. Next.js resets document.title to the layout metadata on
+// every route change, so we re-apply whenever the pathname changes.
 export function SiteTitle() {
   const { settings } = useSiteSettings();
+  const pathname = usePathname();
   useEffect(() => {
     const name = settings?.site_name || "ollmo";
     const desc = settings?.site_description || "";
-    document.title = desc ? `${name} - ${desc}` : name;
-  }, [settings]);
+    const title = desc ? `${name} - ${desc}` : name;
+    // Defer past Next.js's own metadata commit for this route.
+    const t = setTimeout(() => {
+      document.title = title;
+    }, 0);
+    return () => clearTimeout(t);
+  }, [settings, pathname]);
   return null;
 }
