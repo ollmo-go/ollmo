@@ -26,22 +26,35 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { agentNodeTypes, agentEdgeTypes } from "@/components/agent/agent-nodes";
-import { AgentConfigPanel } from "@/components/agent/agent-config-panel";
+import { AgentConfigPanel, normalizeCategories } from "@/components/agent/agent-config-panel";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { useTranslations } from "next-intl";
 import { consumeChatStream } from "@/lib/stream";
 import { toast } from "sonner";
 
+// nextSlug returns a language-independent, unique variable name for a new
+// node, e.g. retrieval_1, llm_2. Prompts reference these as {slug.output}.
+function nextSlug(nodes: { data?: Record<string, unknown> }[], type: string): string {
+  const taken = new Set(nodes.map((n) => String(n.data?.slug ?? "")));
+  let i = 1;
+  while (taken.has(`${type}_${i}`)) i++;
+  return `${type}_${i}`;
+}
+
 function toFlow(def: AgentDefinition): { nodes: Node[]; edges: Edge[] } {
-  // Filter out implicit start/end nodes from legacy definitions.
-  const nodes: Node[] = def.nodes
-    .filter((n: AgentNode) => n.type !== "start" && n.type !== "end")
-    .map((n: AgentNode) => ({
-      id: n.id,
-      type: n.type,
-      position: n.position,
-      data: n.data,
-    }));
+  // Filter out implicit start/end nodes from legacy definitions. Nodes from
+  // graphs predating the variable system get a slug backfilled so their
+  // outputs become referenceable.
+  const raw = def.nodes.filter((n: AgentNode) => n.type !== "start" && n.type !== "end");
+  const slugged = raw.map((n) =>
+    n.data?.slug ? n : { ...n, data: { ...n.data, slug: nextSlug(raw, n.type) } }
+  );
+  const nodes: Node[] = slugged.map((n: AgentNode) => ({
+    id: n.id,
+    type: n.type,
+    position: n.position,
+    data: n.data,
+  }));
   const edges: Edge[] = def.edges
     .filter((e: AgentEdge) =>
       nodes.some((n) => n.id === e.source) && nodes.some((n) => n.id === e.target)
@@ -343,7 +356,7 @@ const DEFAULT_NODE_DATA: Record<string, Record<string, unknown>> = {
   retrieval: { top_k: 10, rerank: true, use_graph: true },
   llm: { system_prompt: "你是一个友好的助手，请根据上下文回答用户问题。如果上下文没有相关信息，可以与用户自由对话。", temperature: 0.7, max_tokens: 2048, top_p: 0.9 },
   message: { text: "" },
-  condition: { variable: "hit_count", operator: ">", value: 0 },
+  condition: { variable: "query", operator: "contains", value: "" },
   classifier: { categories: [], llm_model_id: "" },
 };
 
@@ -380,9 +393,14 @@ function AgentCanvas() {
 
   const selectedNode = nodes.find((n) => n.id === selectedId) || null;
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) || null;
-  const selectedEdgeSourceType = selectedEdge
-    ? nodes.find((n) => n.id === selectedEdge.source)?.type
+  const selectedEdgeSource = selectedEdge
+    ? nodes.find((n) => n.id === selectedEdge.source)
     : undefined;
+  const selectedEdgeSourceType = selectedEdgeSource?.type;
+  const selectedEdgeSourceCategories =
+    selectedEdgeSource?.type === "classifier"
+      ? normalizeCategories(selectedEdgeSource.data.categories)
+      : undefined;
 
   const onNodeDataChange = useCallback(
     (id: string, data: Record<string, unknown>) => {
@@ -397,12 +415,8 @@ function AgentCanvas() {
       if (data.categories !== undefined) {
         const oldNode = nodes.find((n) => n.id === id);
         if (oldNode?.type === "classifier") {
-          const oldCats = Array.isArray(oldNode.data.categories)
-            ? (oldNode.data.categories as string[])
-            : [];
-          const newCats = Array.isArray(data.categories)
-            ? (data.categories as string[])
-            : [];
+          const oldCats = normalizeCategories(oldNode.data.categories).map((c) => c.name);
+          const newCats = normalizeCategories(data.categories).map((c) => c.name);
           const removed = oldCats.filter((c) => !newCats.includes(c));
           const added = newCats.filter((c) => !oldCats.includes(c));
           if (removed.length > 0 && added.length > 0) {
@@ -436,8 +450,15 @@ function AgentCanvas() {
           const cnt = eds.filter((e) => e.source === conn.source).length;
           label = cnt === 0 ? t("agent.branch_true") : t("agent.branch_false");
         } else if (srcNode?.type === "classifier") {
-          const cnt = eds.filter((e) => e.source === conn.source).length;
-          label = `${t("agent.branch_category")} ${cnt + 1}`;
+          // Auto-assign the first category not yet used by a sibling edge so
+          // new branches are routable without manual label editing.
+          const cats = normalizeCategories(srcNode.data.categories)
+            .map((c) => c.name.trim())
+            .filter(Boolean);
+          const used = new Set(
+            eds.filter((e) => e.source === conn.source).map((e) => String(e.label ?? ""))
+          );
+          label = cats.find((c) => !used.has(c)) ?? `${t("agent.branch_category")} ${eds.filter((e) => e.source === conn.source).length + 1}`;
         }
         return addEdge({ ...conn, id: `e-${conn.source}-${conn.target}`, label }, eds);
       });
@@ -469,7 +490,7 @@ function AgentCanvas() {
       id,
       type,
       position: { x: 200 + Math.random() * 100, y: 150 + Math.random() * 100 },
-      data: { ...DEFAULT_NODE_DATA[type] },
+      data: { ...DEFAULT_NODE_DATA[type], slug: nextSlug(nodes, type) },
     };
     setNodes((nds) => [...nds, newNode]);
     setSelectedId(id);
@@ -486,26 +507,39 @@ function AgentCanvas() {
       const rId = `n${now}`;
       const lId = `n${now + 1}`;
       setNodes([
-        { id: rId, type: "retrieval", position: { x: 80, y: 200 }, data: { ...DEFAULT_NODE_DATA.retrieval } },
-        { id: lId, type: "llm", position: { x: 400, y: 200 }, data: { ...DEFAULT_NODE_DATA.llm } },
+        { id: rId, type: "retrieval", position: { x: 80, y: 200 }, data: { ...DEFAULT_NODE_DATA.retrieval, slug: "retrieval_1" } },
+        { id: lId, type: "llm", position: { x: 400, y: 200 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_1" } },
       ]);
       setEdges([{ id: `e-${rId}-${lId}`, source: rId, target: lId }]);
     } else {
+      // Teaching template: every node type plays to its strength.
+      //   classifier → intent routing (doc Q&A vs chitchat — judgeable from
+      //                the query itself, no guessing about KB contents)
+      //   retrieval  → recall
+      //   condition  → relevance gate on the best score (data-driven, unlike
+      //                hit_count which is almost always > 0)
+      //   llm ×2     → grounded answer / free chat
+      //   message    → fixed fallback reply
       const cId = `n${now}`;
       const rId = `n${now + 1}`;
       const cdId = `n${now + 2}`;
       const lId = `n${now + 3}`;
       const mId = `n${now + 4}`;
+      const l2Id = `n${now + 5}`;
       setNodes([
-        { id: cId, type: "classifier", position: { x: 40, y: 200 }, data: { ...DEFAULT_NODE_DATA.classifier, categories: [t("agent.cat_kb"), t("agent.cat_other")] } },
-        { id: rId, type: "retrieval", position: { x: 320, y: 80 }, data: { ...DEFAULT_NODE_DATA.retrieval } },
-        { id: cdId, type: "condition", position: { x: 600, y: 80 }, data: { ...DEFAULT_NODE_DATA.condition } },
-        { id: lId, type: "llm", position: { x: 880, y: 20 }, data: { ...DEFAULT_NODE_DATA.llm, system_prompt: t("agent.template_rag_prompt") } },
-        { id: mId, type: "message", position: { x: 880, y: 280 }, data: { ...DEFAULT_NODE_DATA.message, text: t("agent.template_default_fallback") } },
+        { id: cId, type: "classifier", position: { x: 40, y: 180 }, data: { ...DEFAULT_NODE_DATA.classifier, slug: "classifier_1", categories: [
+          { name: t("agent.cat_kb"), description: t("agent.cat_kb_desc") },
+          { name: t("agent.cat_chat"), description: t("agent.cat_chat_desc") },
+        ] } },
+        { id: rId, type: "retrieval", position: { x: 320, y: 60 }, data: { ...DEFAULT_NODE_DATA.retrieval, slug: "retrieval_1" } },
+        { id: cdId, type: "condition", position: { x: 600, y: 60 }, data: { ...DEFAULT_NODE_DATA.condition, variable: "retrieval_1.top_score", value: "0.35" } },
+        { id: lId, type: "llm", position: { x: 880, y: 0 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_1", system_prompt: t("agent.template_rag_prompt") } },
+        { id: mId, type: "message", position: { x: 880, y: 240 }, data: { ...DEFAULT_NODE_DATA.message, slug: "message_1", text: t("agent.template_default_fallback") } },
+        { id: l2Id, type: "llm", position: { x: 320, y: 340 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_2" } },
       ]);
       setEdges([
         { id: `e-${cId}-${rId}`, source: cId, target: rId, label: t("agent.cat_kb") },
-        { id: `e-${cId}-${mId}`, source: cId, target: mId, label: t("agent.cat_other") },
+        { id: `e-${cId}-${l2Id}`, source: cId, target: l2Id, label: t("agent.cat_chat") },
         { id: `e-${rId}-${cdId}`, source: rId, target: cdId },
         { id: `e-${cdId}-${lId}`, source: cdId, target: lId, label: t("agent.branch_true") },
         { id: `e-${cdId}-${mId}`, source: cdId, target: mId, label: t("agent.branch_false") },
@@ -687,12 +721,15 @@ function AgentCanvas() {
                 node={selectedNode as AgentNode | null}
                 edge={selectedEdge as AgentEdge | null}
                 sourceNodeType={selectedEdgeSourceType}
+                sourceNodeCategories={selectedEdgeSourceCategories}
                 onChange={onNodeDataChange}
                 onEdgeLabelChange={onEdgeLabelChange}
                 openingMessage={openingMessage}
                 onOpeningMessageChange={(v) => { setOpeningMessage(v); setDirty(true); }}
                 suggestedQuestions={suggestedQuestions}
                 onSuggestedQuestionsChange={(v) => { setSuggestedQuestions(v); setDirty(true); }}
+                allNodes={nodes as unknown as AgentNode[]}
+                allEdges={edges as unknown as AgentEdge[]}
               />
             </CardContent>
           </Card>

@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"ollmo/ollmo/pkg/clients"
@@ -13,8 +15,8 @@ import (
 // stays free of search/llm/repo imports.
 type ExecutionDeps struct {
 	// Search runs KB retrieval. Returns formatted context text, hit count,
-	// graph context, citations, and an error.
-	Search func(ctx context.Context, tenantID, kbID, query string, topK int, rerank bool, rerankModelID string, useGraph bool) (context string, hitCount int, graphContext string, citations []any, err error)
+	// top relevance score, graph context, citations, and an error.
+	Search func(ctx context.Context, tenantID, kbID, query string, topK int, rerank bool, rerankModelID string, useGraph bool) (context string, hitCount int, topScore float64, graphContext string, citations []any, err error)
 
 	// ResolveLLM returns the LLM provider for a node. modelID empty = tenant
 	// default.
@@ -47,11 +49,53 @@ type ExecutionContext struct {
 	SystemContext   string
 	GraphContext    string
 	HitCount        int
-	Citations       []any // from the last retrieval node
+	TopScore        float64 // best relevance score from the last retrieval
+	Citations       []any   // from the last retrieval node
 	History         []clients.ChatMessage
 	MemoryContext   string
 	DirectReply     string // set when a message node is the terminal
 	DirectCitations []any
+	// Vars is the variable table keyed "<node-slug>.<output>" (e.g.
+	// "检索_1.context"), plus the reserved "query". Prompts reference these
+	// via {slug.output}; rendering happens once per node visit.
+	Vars map[string]string
+}
+
+func (ec *ExecutionContext) setVar(key, val string) {
+	if ec.Vars == nil {
+		ec.Vars = map[string]string{}
+	}
+	ec.Vars[key] = val
+}
+
+// varRefPattern matches variable references like {检索_1.context} or
+// {LLM_2.output}. The slug part allows letters, digits, underscores, and CJK
+// characters; the output part is lowercase snake_case. Bare placeholders
+// without a dot ({context}, {query}) are intentionally NOT matched — the
+// chat pipeline owns those.
+var varRefPattern = regexp.MustCompile(`\{([\p{L}\p{N}_]+)\.([a-z_]+)\}`)
+
+// renderVars substitutes {slug.output} references with values from the
+// variable table. Unknown references resolve to the empty string. Values are
+// inserted verbatim and never rescanned, so a chunk or user query containing
+// placeholder syntax cannot inject live references.
+func renderVars(text string, vars map[string]string) string {
+	if text == "" || len(vars) == 0 || !strings.Contains(text, "{") {
+		return text
+	}
+	return varRefPattern.ReplaceAllStringFunc(text, func(m string) string {
+		groups := varRefPattern.FindStringSubmatch(m)
+		if v, ok := vars[groups[1]+"."+groups[2]]; ok {
+			return v
+		}
+		return ""
+	})
+}
+
+// nodeSlug returns the node's variable scope name, or "" when unset (legacy
+// graphs predating the variable system).
+func nodeSlug(node Node) string {
+	return nodeString(node.Data, "slug", "")
 }
 
 // TraceStep records one node visit during the graph walk.
@@ -121,6 +165,10 @@ func Execute(
 
 	var trace []TraceStep
 	visited := make(map[string]bool, len(def.Nodes))
+	if ec.Vars == nil {
+		ec.Vars = map[string]string{}
+	}
+	ec.Vars["query"] = ec.Query
 	for len(queue) > 0 {
 		id := queue[0]
 		queue = queue[1:]
@@ -175,14 +223,32 @@ func Execute(
 			}
 
 		case NodeLLM:
-			cfg := ExecutionConfigFromNode(node, ec)
-			ts := TraceStep{NodeID: id, NodeType: node.Type}
-			trace = append(trace, ts)
-			emit(ExecutionEvent{Phase: EvTrace, Trace: &ts})
-			return Terminal{Type: NodeLLM, LLMCfg: &cfg, Trace: trace}
+			// A connected LLM node is an intermediate step (e.g. rewrite,
+			// summarize): run a completion, publish its output as a variable,
+			// and keep walking. A dangling LLM node is the terminal: return
+			// its config for the streaming reply.
+			if len(out[id]) > 0 {
+				detail := execIntermediateLLM(ctx, deps, tenantID, node, ec)
+				ts := TraceStep{NodeID: id, NodeType: node.Type, Detail: detail}
+				trace = append(trace, ts)
+				emit(ExecutionEvent{Phase: EvTrace, Trace: &ts})
+				if next, edgeID := firstTargetWithEdge(out[id]); next != "" {
+					es := TraceStep{EdgeID: edgeID}
+					trace = append(trace, es)
+					emit(ExecutionEvent{Phase: EvTrace, Trace: &es})
+					queue = append(queue, next)
+				}
+			} else {
+				cfg := ExecutionConfigFromNode(node, ec)
+				cfg.SystemPrompt = renderTerminalPrompt(nodeString(node.Data, "system_prompt", ""), ec)
+				ts := TraceStep{NodeID: id, NodeType: node.Type}
+				trace = append(trace, ts)
+				emit(ExecutionEvent{Phase: EvTrace, Trace: &ts})
+				return Terminal{Type: NodeLLM, LLMCfg: &cfg, Trace: trace}
+			}
 
 		case NodeMessage:
-			ec.DirectReply = nodeString(node.Data, "text", "")
+			ec.DirectReply = renderVars(nodeString(node.Data, "text", ""), ec.Vars)
 			ec.DirectCitations = nil
 			ts := TraceStep{NodeID: id, NodeType: node.Type}
 			trace = append(trace, ts)
@@ -242,21 +308,30 @@ func execRetrieval(ctx context.Context, deps ExecutionDeps, tenantID, kbID strin
 	if deps.Search == nil {
 		return
 	}
-	ctxText, hitCount, graphCtx, cits, err := deps.Search(ctx, tenantID, kbID, ec.Query, topK, rerank, rerankModelID, useGraph)
+	ctxText, hitCount, topScore, graphCtx, cits, err := deps.Search(ctx, tenantID, kbID, ec.Query, topK, rerank, rerankModelID, useGraph)
 	if err != nil {
 		emit(ExecutionEvent{Phase: EvWarning, Warning: "Retrieval failed; answering without context."})
 		return
 	}
 	ec.SystemContext = ctxText
 	ec.HitCount = hitCount
+	ec.TopScore = topScore
 	ec.GraphContext = graphCtx
 	ec.Citations = cits
+	if slug := nodeSlug(node); slug != "" {
+		ec.setVar(slug+".context", ctxText)
+		ec.setVar(slug+".hit_count", strconv.Itoa(hitCount))
+		ec.setVar(slug+".top_score", strconv.FormatFloat(topScore, 'f', 3, 64))
+		if graphCtx != "" {
+			ec.setVar(slug+".graph_context", graphCtx)
+		}
+	}
 }
 
 // execClassifierWithDetail classifies the query and returns the target node ID
 // plus a human-readable detail string for the execution trace.
 func execClassifierWithDetail(ctx context.Context, deps ExecutionDeps, tenantID string, node Node, ec *ExecutionContext, edges []Edge) (string, string) {
-	cats := nodeStringSlice(node.Data, "categories")
+	cats := nodeCategories(node.Data)
 	if len(cats) == 0 || len(edges) == 0 {
 		return firstTarget(edges), "no categories"
 	}
@@ -270,9 +345,19 @@ func execClassifierWithDetail(ctx context.Context, deps ExecutionDeps, tenantID 
 		return firstTarget(edges), "llm resolve failed"
 	}
 
+	// Each category line carries its optional description so the LLM has a
+	// basis for judging; names alone (e.g. "其他问题") are ambiguous.
+	lines := make([]string, len(cats))
+	for i, c := range cats {
+		if c.Description != "" {
+			lines[i] = c.Name + "：" + c.Description
+		} else {
+			lines[i] = c.Name
+		}
+	}
 	prompt := fmt.Sprintf(
 		"你是一个问题分类器。请将用户的问题分类到以下类别之一，只输出类别名称，不要输出其他内容。\n\n类别：\n%s\n\n用户问题：%s",
-		strings.Join(cats, "\n"), ec.Query,
+		strings.Join(lines, "\n"), ec.Query,
 	)
 	resp, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{
 		Model: model,
@@ -286,58 +371,94 @@ func execClassifierWithDetail(ctx context.Context, deps ExecutionDeps, tenantID 
 		return firstTarget(edges), "classify error: " + err.Error()
 	}
 	resp = strings.TrimSpace(resp)
-	target := matchEdgeByLabel(edges, resp, cats[0])
+	target := matchEdgeByLabel(edges, resp, cats[0].Name)
+	if slug := nodeSlug(node); slug != "" && resp != "" {
+		ec.setVar(slug+".label", resp)
+	}
 	return target, "classified: " + resp
 }
 
 // execConditionWithDetail evaluates the condition and returns the target node
-// ID plus a human-readable detail for the execution trace.
+// ID plus a human-readable detail for the execution trace. The variable may
+// be a built-in metric (hit_count/top_score from the last retrieval) or any
+// variable-table entry (query, {slug.output}). Values compare numerically
+// when both sides parse as numbers, otherwise as strings (==/!=/contains).
 func execConditionWithDetail(node Node, ec *ExecutionContext, edges []Edge) (string, string) {
 	if len(edges) == 0 {
 		return "", "no edges"
 	}
 	variable := nodeString(node.Data, "variable", "hit_count")
 	op := nodeString(node.Data, "operator", ">")
-	val := nodeInt(node.Data, "value", 0)
-
-	cond := false
-	switch variable {
-	case "hit_count":
-		cond = compareInt(ec.HitCount, op, val)
+	valStr := nodeString(node.Data, "value", "")
+	if valStr == "" {
+		if f, ok := node.Data["value"].(float64); ok {
+			valStr = strconv.FormatFloat(f, 'f', -1, 64)
+		}
 	}
 
-	// Match true/false branch by edge label.
+	var left string
+	switch variable {
+	case "hit_count":
+		left = strconv.Itoa(ec.HitCount)
+	case "top_score":
+		left = strconv.FormatFloat(ec.TopScore, 'f', 3, 64)
+	default:
+		left = ec.Vars[variable]
+	}
+
+	cond := compareValue(left, op, valStr)
+	detail := fmt.Sprintf("%s %s %s = %v (%s)", variable, op, valStr, cond, left)
+
+	// Match true/false branch by edge label. Legacy spellings stay routable
+	// so graphs saved before label renames keep working.
 	for _, e := range edges {
 		lbl := strings.ToLower(strings.TrimSpace(e.Label))
-		if cond && (lbl == "true" || lbl == "条件成立" || lbl == "是") {
-			return e.Target, fmt.Sprintf("%s %s %d = true (%d)", variable, op, val, ec.HitCount)
+		if cond && (lbl == "true" || lbl == "满足" || lbl == "条件成立" || lbl == "是") {
+			return e.Target, detail
 		}
-		if !cond && (lbl == "false" || lbl == "条件不成立" || lbl == "否") {
-			return e.Target, fmt.Sprintf("%s %s %d = false (%d)", variable, op, val, ec.HitCount)
+		if !cond && (lbl == "false" || lbl == "不满足" || lbl == "条件不成立" || lbl == "否") {
+			return e.Target, detail
 		}
 	}
 	// Positional fallback.
 	if cond && len(edges) >= 1 {
-		return edges[0].Target, fmt.Sprintf("%s %s %d = true (%d)", variable, op, val, ec.HitCount)
+		return edges[0].Target, detail
 	}
 	if !cond && len(edges) >= 2 {
-		return edges[1].Target, fmt.Sprintf("%s %s %d = false (%d)", variable, op, val, ec.HitCount)
+		return edges[1].Target, detail
 	}
-	return edges[0].Target, fmt.Sprintf("%s %s %d = %v (fallback)", variable, op, val, cond)
+	return edges[0].Target, detail + " (fallback)"
 }
 
-func compareInt(a int, op string, b int) bool {
+// compareValue compares numerically when both sides parse as floats,
+// otherwise falls back to string semantics (==, !=, contains).
+func compareValue(left, op, right string) bool {
+	if lf, err1 := strconv.ParseFloat(strings.TrimSpace(left), 64); err1 == nil {
+		if rf, err2 := strconv.ParseFloat(strings.TrimSpace(right), 64); err2 == nil {
+			switch op {
+			case ">":
+				return lf > rf
+			case ">=":
+				return lf >= rf
+			case "==":
+				return lf == rf
+			case "!=":
+				return lf != rf
+			case "<":
+				return lf < rf
+			case "<=":
+				return lf <= rf
+			}
+			return false
+		}
+	}
 	switch op {
-	case ">":
-		return a > b
-	case ">=":
-		return a >= b
 	case "==":
-		return a == b
-	case "<":
-		return a < b
-	case "<=":
-		return a <= b
+		return left == right
+	case "!=":
+		return left != right
+	case "contains":
+		return right != "" && strings.Contains(left, right)
 	}
 	return false
 }
@@ -384,6 +505,64 @@ func ExecutionConfigFromNode(node Node, ec *ExecutionContext) ExecutionConfig {
 	return cfg
 }
 
+// renderTerminalPrompt renders variable references in a terminal llm node's
+// system prompt. When the prompt explicitly references a retrieval output
+// (any {slug.context} / {slug.graph_context}), the rendered text already
+// carries the retrieval content, so the shared context fields are cleared to
+// keep the chat pipeline from appending the same chunks a second time.
+func renderTerminalPrompt(raw string, ec *ExecutionContext) string {
+	if raw == "" {
+		return ""
+	}
+	referencedRetrieval := false
+	for _, m := range varRefPattern.FindAllStringSubmatch(raw, -1) {
+		if m[2] == "context" || m[2] == "graph_context" {
+			referencedRetrieval = true
+			break
+		}
+	}
+	out := renderVars(raw, ec.Vars)
+	if referencedRetrieval {
+		ec.SystemContext = ""
+		ec.GraphContext = ""
+		ec.setVar("context", "")
+	}
+	return out
+}
+
+// execIntermediateLLM runs a non-terminal llm node (rewrite, summarize, ...)
+// synchronously and publishes its output as {slug.output}. Returns a trace
+// detail string.
+func execIntermediateLLM(ctx context.Context, deps ExecutionDeps, tenantID string, node Node, ec *ExecutionContext) string {
+	slug := nodeSlug(node)
+	if slug == "" {
+		return "skipped: no slug"
+	}
+	if deps.ResolveLLM == nil || deps.ChatComplete == nil {
+		return "llm deps not wired"
+	}
+	endpoint, model, apiKey, err := deps.ResolveLLM(ctx, tenantID, nodeString(node.Data, "llm_model_id", ""))
+	if err != nil {
+		return "llm resolve failed: " + err.Error()
+	}
+	system := renderVars(nodeString(node.Data, "system_prompt", ""), ec.Vars)
+	resp, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{
+		Model: model,
+		Messages: []clients.ChatMessage{
+			{Role: "system", Content: system},
+			{Role: "user", Content: ec.Query},
+		},
+		Temperature: nodeFloat(node.Data, "temperature", 0.7),
+		MaxTokens:   nodeInt(node.Data, "max_tokens", 2048),
+	})
+	if err != nil {
+		return "llm error: " + err.Error()
+	}
+	out := strings.TrimSpace(resp)
+	ec.setVar(slug+".output", out)
+	return fmt.Sprintf("chars=%d", len(out))
+}
+
 func nodeString(m map[string]interface{}, key, def string) string {
 	if v, ok := m[key]; ok {
 		if s, ok := v.(string); ok {
@@ -426,8 +605,18 @@ func nodeBool(m map[string]interface{}, key string, def bool) bool {
 	return def
 }
 
-func nodeStringSlice(m map[string]interface{}, key string) []string {
-	v, ok := m[key]
+// category is one classifier branch: a name (matched against edge labels)
+// plus an optional description fed to the LLM as the judging basis.
+type category struct {
+	Name        string
+	Description string
+}
+
+// nodeCategories reads a classifier node's categories, accepting both the
+// legacy plain-string form ("分类A") and the structured form
+// ({"name": "分类A", "description": "..."}).
+func nodeCategories(m map[string]interface{}) []category {
+	v, ok := m["categories"]
 	if !ok {
 		return nil
 	}
@@ -435,10 +624,18 @@ func nodeStringSlice(m map[string]interface{}, key string) []string {
 	if !ok {
 		return nil
 	}
-	out := make([]string, 0, len(arr))
+	out := make([]category, 0, len(arr))
 	for _, item := range arr {
-		if s, ok := item.(string); ok && s != "" {
-			out = append(out, s)
+		switch c := item.(type) {
+		case string:
+			if c != "" {
+				out = append(out, category{Name: c})
+			}
+		case map[string]interface{}:
+			name := nodeString(c, "name", "")
+			if name != "" {
+				out = append(out, category{Name: name, Description: nodeString(c, "description", "")})
+			}
 		}
 	}
 	return out

@@ -48,19 +48,23 @@ func promptBudget(p *llm.LLMModel) int {
 // tenantID/kbID/query from the surrounding scope.
 func (s *Service) graphDeps(tenantID, kbID, query string) agent.ExecutionDeps {
 	return agent.ExecutionDeps{
-		Search: func(ctx context.Context, tid, kid, q string, topK int, rerank bool, rerankModelID string, useGraph bool) (string, int, string, []any, error) {
+		Search: func(ctx context.Context, tid, kid, q string, topK int, rerank bool, rerankModelID string, useGraph bool) (string, int, float64, string, []any, error) {
 			r, err := s.searchSvc.Search(ctx, tid, kid, search.SearchRequest{
 				Query: q, TopK: topK, Rerank: &rerank, RerankModelID: rerankModelID,
 			})
 			if err != nil {
-				return "", 0, "", nil, err
+				return "", 0, 0, "", nil, err
 			}
 			ctxText, cits := formatContext(r.Hits)
 			graphCtx := r.GraphContext
 			if !useGraph {
 				graphCtx = ""
 			}
-			return ctxText, len(r.Hits), graphCtx, citationsToAny(cits), nil
+			var top float64
+			if len(r.Hits) > 0 {
+				top = r.Hits[0].Score
+			}
+			return ctxText, len(r.Hits), top, graphCtx, citationsToAny(cits), nil
 		},
 		ResolveLLM: func(ctx context.Context, tid, modelID string) (string, string, string, error) {
 			p, err := s.resolveProvider(ctx, tid, modelID)

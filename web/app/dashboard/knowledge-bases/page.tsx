@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Bot, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Drawer } from "@/components/ui/drawer";
@@ -255,6 +255,11 @@ export default function KnowledgeBasesPage() {
               </CardContent>
             </Link>
             <div className="px-4 pb-3 flex items-center gap-1">
+              <Button size="sm" variant="ghost" asChild>
+                <Link href={`/dashboard/knowledge-bases/${kb.id}/agent`}>
+                  <Bot className="h-3.5 w-3.5 mr-1" /> {t("kb.agent")}
+                </Link>
+              </Button>
               <Button size="sm" variant="ghost" onClick={() => openEdit(kb)}>
                 <Pencil className="h-3.5 w-3.5 mr-1" /> {t("common.edit")}
               </Button>

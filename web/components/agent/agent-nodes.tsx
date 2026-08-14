@@ -10,8 +10,9 @@ import {
   useReactFlow,
   type EdgeProps,
 } from "reactflow";
-import { Search, Brain, MessageSquare, GitBranch, Split, X } from "lucide-react";
+import { Search, Brain, MessageSquare, GitBranch, Split, Check, X } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { normalizeCategories } from "./agent-config-panel";
 
 interface NodeData {
   [key: string]: unknown;
@@ -126,11 +127,19 @@ export const ConditionNode = memo(({ id, data, selected }: NodeCompProps) => {
   const onDelete = useDeleteNode(id);
   const variable = String(data.variable || "hit_count");
   const op = String(data.operator || ">");
-  const val = String(data.value || "0");
+  const val = String(data.value ?? "");
+  const varName =
+    variable === "hit_count"
+      ? t("agent.var_hit_count")
+      : variable === "top_score"
+        ? t("agent.var_top_score")
+        : variable === "query"
+          ? t("agent.var_query")
+          : variable;
   return nodeShell(
     t("agent.node_condition"),
     <GitBranch className="h-4 w-4" />,
-    `${variable} ${op} ${val}`,
+    `${varName} ${op === "contains" ? t("agent.op_contains") : op} ${val}`,
     !!selected,
     accents.condition,
     onDelete
@@ -140,11 +149,11 @@ export const ConditionNode = memo(({ id, data, selected }: NodeCompProps) => {
 export const ClassifierNode = memo(({ id, data, selected }: NodeCompProps) => {
   const t = useTranslations();
   const onDelete = useDeleteNode(id);
-  const categories = Array.isArray(data.categories) ? data.categories as string[] : [];
+  const names = normalizeCategories(data.categories).map((c) => c.name.trim()).filter(Boolean);
   return nodeShell(
     t("agent.node_classifier"),
     <Split className="h-4 w-4" />,
-    categories.length > 0 ? categories.join(" / ") : t("agent.node_classifier_default"),
+    names.length > 0 ? names.join(" / ") : t("agent.node_classifier_default"),
     !!selected,
     accents.classifier,
     onDelete
@@ -174,6 +183,11 @@ const LabeledEdge = memo(function LabeledEdge({
   selected,
 }: EdgeProps) {
   const { deleteElements } = useReactFlow();
+  const t = useTranslations();
+  // Branch semantics: condition-true edges read as success (green check),
+  // false as failure (red cross). Legacy spellings stay recognized.
+  const isTrue = label === t("agent.branch_true") || label === "true" || label === "条件成立";
+  const isFalse = label === t("agent.branch_false") || label === "false" || label === "条件不成立";
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -203,9 +217,22 @@ const LabeledEdge = memo(function LabeledEdge({
           className="flex items-center gap-1 nodrag nopan"
         >
           {label ? (
-            <span className="rounded border border-border bg-popover px-2 py-0.5 text-xs font-medium text-foreground shadow-sm cursor-pointer hover:border-primary transition-colors">
-              {label}
-            </span>
+            isTrue || isFalse ? (
+              <span
+                className={`flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-medium shadow-sm cursor-pointer transition-colors ${
+                  isTrue
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500"
+                    : "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400 hover:border-red-500"
+                }`}
+              >
+                {isTrue ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                {label}
+              </span>
+            ) : (
+              <span className="rounded border border-border bg-popover px-2 py-0.5 text-xs font-medium text-foreground shadow-sm cursor-pointer hover:border-primary transition-colors">
+                {label}
+              </span>
+            )
           ) : null}
           {selected ? (
             <button
