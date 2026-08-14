@@ -119,7 +119,7 @@ func (s *Service) Upload(ctx context.Context, tenantID, ownerID, kbID, filename,
 	if _, err := s.asynq.EnqueueContext(ctx, task,
 		asynq.MaxRetry(3),
 		asynq.Timeout(30*time.Minute),
-		asynq.Queue("default"),
+		asynq.Queue(QueuePipeline),
 	); err != nil {
 		// Mark the doc as failed but don't roll back the upload; the user can
 		// trigger a reparse from the UI.
@@ -296,7 +296,7 @@ func (s *Service) Reparse(ctx context.Context, tenantID, kbID, id string) error 
 	if err != nil {
 		return errs.Wrap(errs.CodeInternal, "build parse task", err)
 	}
-	if _, err := s.asynq.EnqueueContext(ctx, task, asynq.MaxRetry(3), asynq.Timeout(30*time.Minute)); err != nil {
+	if _, err := s.asynq.EnqueueContext(ctx, task, asynq.MaxRetry(3), asynq.Timeout(30*time.Minute), asynq.Queue(QueuePipeline)); err != nil {
 		return errs.Wrap(errs.CodeInternal, "enqueue parse task", err)
 	}
 	return s.repo.UpdateDocStatus(tenantID, id, StatusQueued, "")
@@ -314,7 +314,7 @@ func (s *Service) EnqueueEmbed(ctx context.Context, tenantID, kbID, docID string
 	if _, err := s.asynq.EnqueueContext(ctx, task,
 		asynq.MaxRetry(3),
 		asynq.Timeout(30*time.Minute),
-		asynq.Queue("default"),
+		asynq.Queue(QueuePipeline),
 	); err != nil {
 		return errs.Wrap(errs.CodeInternal, "enqueue embed task", err)
 	}
@@ -355,7 +355,7 @@ func (s *Service) EnqueueExtract(ctx context.Context, tenantID, kbID, docID stri
 	if _, err := s.asynq.EnqueueContext(ctx, task,
 		asynq.MaxRetry(2),
 		asynq.Timeout(20*time.Minute),
-		asynq.Queue("default"),
+		asynq.Queue(QueuePipeline),
 	); err != nil {
 		return errs.Wrap(errs.CodeInternal, "enqueue extract task", err)
 	}

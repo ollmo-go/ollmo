@@ -16,6 +16,15 @@ const (
 	TaskExtractDocument = "doc:extract"
 )
 
+// Queue assignment. Document pipeline tasks run on QueuePipeline, served by
+// a dedicated worker pool sized for long MinerU jobs; short interactive
+// tasks (conversation summaries) stay on QueueDefault with their own slots
+// so neither class can starve the other.
+const (
+	QueuePipeline = "parse"
+	QueueDefault  = "default"
+)
+
 type ParseDocumentPayload struct {
 	TenantID  string `json:"tenant_id"`
 	KbID      string `json:"kb_id"`

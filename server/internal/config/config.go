@@ -21,6 +21,7 @@ type Config struct {
 	MinerU MinerUConfig `yaml:"mineru"`
 	Auth   AuthConfig   `yaml:"auth"`
 	Quota  QuotaConfig  `yaml:"quota"`
+	Worker WorkerConfig `yaml:"worker"`
 }
 
 type ServerConfig struct {
@@ -77,6 +78,16 @@ type AuthConfig struct {
 	// the signing secret without making stored ciphertexts undecryptable.
 	// Resolved in Load: falls back to the ORIGINAL JWTSecret when unset.
 	EncryptionKey string `yaml:"encryption_key"`
+}
+
+// WorkerConfig sizes the two Asynq worker pools. Pipeline slots run the
+// document pipeline (parse/embed/extract, including 30-minute MinerU jobs);
+// aux slots run short interactive tasks (conversation summaries). Separate
+// pools keep a batch of long parses from starving summary generation and
+// vice versa. Values <= 0 fall back to the defaults in Load.
+type WorkerConfig struct {
+	PipelineConcurrency int `yaml:"pipeline_concurrency"`
+	AuxConcurrency      int `yaml:"aux_concurrency"`
 }
 
 // QuotaConfig holds per-plan resource limits. Plans are matched by name
@@ -206,6 +217,7 @@ func defaults() *Config {
 		Milvus: MilvusConfig{Host: "localhost", Port: "19530"},
 		MinerU: MinerUConfig{Endpoint: "http://localhost:8000"},
 		Auth:   AuthConfig{JWTSecret: "change_me", JWTExpireHours: 168},
+		Worker: WorkerConfig{PipelineConcurrency: 5, AuxConcurrency: 2},
 		Quota: QuotaConfig{
 			Free:       PlanQuota{DocQuota: 100, VectorQuota: 10000, MessageQuota: 100, UserMessageQuota: 20},
 			Pro:        PlanQuota{DocQuota: 1000, VectorQuota: 100000, MessageQuota: 1000, UserMessageQuota: 100},
@@ -280,5 +292,22 @@ func overrideFromEnv(cfg *Config) {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Auth.JWTExpireHours = n
 		}
+	}
+	if v := g("WORKER_PIPELINE_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Worker.PipelineConcurrency = n
+		}
+	}
+	if v := g("WORKER_AUX_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Worker.AuxConcurrency = n
+		}
+	}
+	// Guard against yaml/env values that would disable a pool entirely.
+	if cfg.Worker.PipelineConcurrency <= 0 {
+		cfg.Worker.PipelineConcurrency = 5
+	}
+	if cfg.Worker.AuxConcurrency <= 0 {
+		cfg.Worker.AuxConcurrency = 2
 	}
 }

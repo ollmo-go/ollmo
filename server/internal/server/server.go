@@ -151,15 +151,21 @@ func RunWorker(cfg *config.Config) error {
 		graphSvc, llmRepo,
 	).WithQuotaChecker(&quotaAdapter{repo: tenant.NewRepo(deps.DB)})
 
-	srv := asynq.NewServer(
-		asynq.RedisClientOpt{Addr: cfg.Redis.Addr(), Password: cfg.Redis.Password},
-		asynq.Config{
-			Concurrency: 5,
-			Queues: map[string]int{
-				"default": 1,
-			},
-		},
-	)
+	// Two independent worker pools share one mux. The pipeline pool serves
+	// the "parse" queue (doc:parse/embed/extract, including 30-minute MinerU
+	// jobs) with its own concurrency; the aux pool serves "default" (short
+	// interactive tasks such as conversation summaries). Separate pools mean
+	// a batch of long parses can never occupy the slots that summaries need,
+	// and vice versa.
+	redisOpt := asynq.RedisClientOpt{Addr: cfg.Redis.Addr(), Password: cfg.Redis.Password}
+	pipelineSrv := asynq.NewServer(redisOpt, asynq.Config{
+		Concurrency: cfg.Worker.PipelineConcurrency,
+		Queues:      map[string]int{doc.QueuePipeline: 1},
+	})
+	auxSrv := asynq.NewServer(redisOpt, asynq.Config{
+		Concurrency: cfg.Worker.AuxConcurrency,
+		Queues:      map[string]int{doc.QueueDefault: 1},
+	})
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(doc.TaskParseDocument, docWorker.HandleParse)
 	mux.HandleFunc(doc.TaskEmbedDocument, docWorker.HandleEmbed)
@@ -175,9 +181,19 @@ func RunWorker(cfg *config.Config) error {
 	cleanupWorker := doc.NewCleanupWorker(deps.DB, deps.Vector, deps.MinIO, deps.cfg.MinIO.Bucket)
 	go cleanupWorker.Start(context.Background())
 
-	log.Printf("[worker] starting with concurrency=5, handlers: %s, %s, %s, %s",
+	log.Printf("[worker] starting: queue %q concurrency=%d (doc pipeline), queue %q concurrency=%d (aux); handlers: %s, %s, %s, %s",
+		doc.QueuePipeline, cfg.Worker.PipelineConcurrency,
+		doc.QueueDefault, cfg.Worker.AuxConcurrency,
 		doc.TaskParseDocument, doc.TaskEmbedDocument, doc.TaskExtractDocument, memory.TaskSummarizeConversation)
-	return srv.Run(mux)
+
+	// Both pools watch for SIGTERM/SIGINT and shut down gracefully. The aux
+	// pool runs in a goroutine; RunWorker blocks on the pipeline pool.
+	go func() {
+		if err := auxSrv.Run(mux); err != nil {
+			log.Printf("[worker] aux pool exited: %v", err)
+		}
+	}()
+	return pipelineSrv.Run(mux)
 }
 
 func initDeps(cfg *config.Config) (*Deps, error) {

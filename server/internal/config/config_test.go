@@ -112,3 +112,19 @@ func TestResolveSecrets_StrongJWTUntouched(t *testing.T) {
 		t.Errorf("EncryptionKey = %q, want fallback to the JWT secret", c.Auth.EncryptionKey)
 	}
 }
+
+// TestWorkerConcurrency_DefaultsAndEnvOverride verifies the worker pool
+// sizing: positive env values apply, zero/negative values fall back to the
+// defaults so a pool can never be silently disabled.
+func TestWorkerConcurrency_DefaultsAndEnvOverride(t *testing.T) {
+	t.Setenv("WORKER_PIPELINE_CONCURRENCY", "12")
+	t.Setenv("WORKER_AUX_CONCURRENCY", "0")
+	cfg := defaults()
+	overrideFromEnv(cfg)
+	if cfg.Worker.PipelineConcurrency != 12 {
+		t.Errorf("PipelineConcurrency = %d, want 12 from env", cfg.Worker.PipelineConcurrency)
+	}
+	if cfg.Worker.AuxConcurrency != 2 {
+		t.Errorf("AuxConcurrency = %d, want default 2 (0 must not disable the pool)", cfg.Worker.AuxConcurrency)
+	}
+}
