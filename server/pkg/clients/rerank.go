@@ -101,7 +101,7 @@ func (c *RerankClient) Rerank(ctx context.Context, model, query string, docs []R
 
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("rerank http %d: %s", resp.StatusCode, b)
+		return nil, fmt.Errorf("rerank http %d: %s", resp.StatusCode, Snippet(b))
 	}
 
 	var out rerankResponse

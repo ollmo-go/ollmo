@@ -104,20 +104,20 @@ func (c *LLMClient) Chat(ctx context.Context, endpoint, apiKey string, req ChatR
 
 	rawBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("llm http %d: %s", resp.StatusCode, rawBody)
+		return "", fmt.Errorf("llm http %d: %s", resp.StatusCode, Snippet(rawBody))
 	}
 
 	log.Printf("[llm] response from %s model=%s status=%d body=%s", endpoint, req.Model, resp.StatusCode, string(rawBody))
 
 	var out chatResponse
 	if err := json.Unmarshal(rawBody, &out); err != nil {
-		return "", fmt.Errorf("decode llm response: %w (raw: %s)", err, string(rawBody))
+		return "", fmt.Errorf("decode llm response: %w (raw: %s)", err, Snippet(rawBody))
 	}
 	if out.Error != nil {
 		return "", fmt.Errorf("llm error: %s", out.Error.Message)
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("llm returned no choices (raw: %s)", string(rawBody))
+		return "", fmt.Errorf("llm returned no choices (raw: %s)", Snippet(rawBody))
 	}
 	return out.Choices[0].Message.Content, nil
 }
@@ -167,7 +167,7 @@ func (c *LLMClient) ChatStream(ctx context.Context, endpoint, apiKey string, req
 
 		if resp.StatusCode >= 400 {
 			b, _ := io.ReadAll(resp.Body)
-			out <- ChatStreamDelta{Err: fmt.Errorf("llm stream http %d: %s", resp.StatusCode, b)}
+			out <- ChatStreamDelta{Err: fmt.Errorf("llm stream http %d: %s", resp.StatusCode, Snippet(b))}
 			return
 		}
 

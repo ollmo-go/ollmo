@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"ollmo/ollmo/pkg/clients"
+	"ollmo/ollmo/pkg/crypto"
 	"ollmo/ollmo/pkg/errs"
 )
 
@@ -67,6 +68,9 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID string, in Creat
 	if in.Endpoint == "" {
 		in.Endpoint = defaultEndpoint(in.Provider)
 	}
+	if err := clients.ValidateEndpoint(in.Endpoint); err != nil {
+		return nil, errs.BadRequest(err.Error())
+	}
 	if in.Temperature == 0 {
 		in.Temperature = 0.7
 	}
@@ -101,11 +105,17 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID string, in Creat
 			log.Printf("[llm] clear default failed tenant=%s provider=%s: %v", tenantID, p.ID, err)
 		}
 	}
+	p.APIKey = crypto.MaskSecret(p.APIKey)
 	return p, nil
 }
 
 func (s *Service) Get(ctx context.Context, tenantID, id string) (*LLMModel, error) {
-	return s.repo.FindByID(tenantID, id)
+	p, err := s.repo.FindByID(tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	p.APIKey = crypto.MaskSecret(p.APIKey)
+	return p, nil
 }
 
 // GetDefault returns the tenant's default provider. The chat domain calls this
@@ -121,7 +131,14 @@ func (s *Service) List(ctx context.Context, tenantID string, page, size int) ([]
 	if size <= 0 || size > 100 {
 		size = 20
 	}
-	return s.repo.List(tenantID, page, size)
+	items, total, err := s.repo.List(tenantID, page, size)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, p := range items {
+		p.APIKey = crypto.MaskSecret(p.APIKey)
+	}
+	return items, total, nil
 }
 
 func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInput) (*LLMModel, error) {
@@ -139,9 +156,14 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInpu
 		p.Provider = *in.Provider
 	}
 	if in.Endpoint != nil {
+		if err := clients.ValidateEndpoint(*in.Endpoint); err != nil {
+			return nil, errs.BadRequest(err.Error())
+		}
 		p.Endpoint = *in.Endpoint
 	}
-	if in.APIKey != nil {
+	// Empty or the masked form of the current key means "unchanged", so a
+	// client echoing back the masked value never corrupts the stored secret.
+	if in.APIKey != nil && *in.APIKey != "" && *in.APIKey != crypto.MaskSecret(p.APIKey) {
 		p.APIKey = *in.APIKey
 	}
 	if in.Model != nil {
@@ -173,6 +195,7 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInpu
 			log.Printf("[llm] clear default failed tenant=%s provider=%s: %v", tenantID, p.ID, err)
 		}
 	}
+	p.APIKey = crypto.MaskSecret(p.APIKey)
 	return p, nil
 }
 

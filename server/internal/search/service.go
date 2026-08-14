@@ -206,7 +206,12 @@ func (s *Service) Search(ctx context.Context, tenantID, kbID string, req SearchR
 				hits = ordered
 			}
 		}
-	} else if len(hits) > req.TopK {
+	}
+	// Final TopK trim. Rerank failures degrade to the RRF order, but the
+	// expanded candidate set (TopK*3, min 20) must not leak through: callers
+	// would stuff every candidate into the prompt. Also guards against a
+	// rerank endpoint returning more entries than the requested top_n.
+	if len(hits) > req.TopK {
 		hits = hits[:req.TopK]
 	}
 

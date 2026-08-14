@@ -152,15 +152,17 @@ func (s *Service) summarize(ctx context.Context, tenantID string, conv *chat.Con
 	return m, nil
 }
 
-// BuildContext returns a newline-separated summary block from recent ACTIVE
-// memories in a KB. The chat service appends this to the system prompt so the
-// LLM has access to cross-session context without loading full message
-// histories. Disabled/forgotten memories are excluded.
-func (s *Service) BuildContext(ctx context.Context, tenantID, kbID string, limit int) (string, error) {
+// BuildContext returns a newline-separated summary block from the user's
+// recent ACTIVE memories in a KB. The chat service appends this to the
+// system prompt so the LLM has access to cross-session context without
+// loading full message histories. Memories are per user: on shared KBs,
+// other members' summaries are never injected. Disabled/forgotten memories
+// are excluded.
+func (s *Service) BuildContext(ctx context.Context, tenantID, userID, kbID string, limit int) (string, error) {
 	if limit <= 0 {
 		limit = 5
 	}
-	items, err := s.repo.ListActiveByKB(tenantID, kbID, limit)
+	items, err := s.repo.ListActiveByKB(tenantID, userID, kbID, limit)
 	if err != nil || len(items) == 0 {
 		return "", nil
 	}
@@ -172,14 +174,14 @@ func (s *Service) BuildContext(ctx context.Context, tenantID, kbID string, limit
 	return b.String(), nil
 }
 
-func (s *Service) List(tenantID, kbID string, page, size int) ([]*Memory, int64, error) {
+func (s *Service) List(tenantID, userID, kbID string, page, size int) ([]*Memory, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
 	if size <= 0 || size > 100 {
 		size = 20
 	}
-	return s.repo.ListByKB(tenantID, kbID, page, size)
+	return s.repo.ListByKB(tenantID, userID, kbID, page, size)
 }
 
 func (s *Service) Delete(tenantID, kbID, id string) error {

@@ -24,9 +24,10 @@ type AgentConfigFetcher func(ctx context.Context, tenantID, kbID string) (*agent
 // returning nil, the chat service falls back to AgentConfigFetcher (flat config).
 type AgentDefinitionFetcher func(ctx context.Context, tenantID, kbID string) (*agent.Definition, error)
 
-// MemoryContextFetcher returns past conversation summaries for a KB. When nil
-// or returning empty, the chat service omits memory context from the prompt.
-type MemoryContextFetcher func(ctx context.Context, tenantID, kbID string) (string, error)
+// MemoryContextFetcher returns a user's past conversation summaries for a
+// KB. When nil or returning empty, the chat service omits memory context
+// from the prompt.
+type MemoryContextFetcher func(ctx context.Context, tenantID, userID, kbID string) (string, error)
 
 // AutoMemoryTrigger is invoked after each completed (persisted) chat turn.
 // The implementation decides whether the conversation should be summarized
@@ -392,7 +393,7 @@ func (s *Service) TestStream(ctx context.Context, tenantID, userID, kbID, query 
 		}
 	}
 	out := make(chan StreamReply, 16)
-	go s.testStream(ctx, tenantID, kbID, query, provider, out, cfg)
+	go s.testStream(ctx, tenantID, userID, kbID, query, provider, out, cfg)
 	return out, nil
 }
 
@@ -426,11 +427,11 @@ func (s *Service) loadAgentDefinition(ctx context.Context, tenantID, kbID string
 // loadMemoryContext returns past conversation summaries for a KB. When no
 // memory fetcher is wired or it errors, an empty string is returned so the
 // chat flow proceeds without memory context.
-func (s *Service) loadMemoryContext(ctx context.Context, tenantID, kbID string) string {
+func (s *Service) loadMemoryContext(ctx context.Context, tenantID, userID, kbID string) string {
 	if s.memCtx == nil {
 		return ""
 	}
-	memCtx, err := s.memCtx(ctx, tenantID, kbID)
+	memCtx, err := s.memCtx(ctx, tenantID, userID, kbID)
 	if err != nil {
 		return ""
 	}

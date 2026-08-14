@@ -13,8 +13,8 @@ import (
 // stays free of search/llm/repo imports.
 type ExecutionDeps struct {
 	// Search runs KB retrieval. Returns formatted context text, hit count,
-	// graph context, and an error.
-	Search func(ctx context.Context, tenantID, kbID, query string, topK int, rerank bool, rerankModelID string, useGraph bool) (context string, hitCount int, graphContext string, err error)
+	// graph context, citations, and an error.
+	Search func(ctx context.Context, tenantID, kbID, query string, topK int, rerank bool, rerankModelID string, useGraph bool) (context string, hitCount int, graphContext string, citations []any, err error)
 
 	// ResolveLLM returns the LLM provider for a node. modelID empty = tenant
 	// default.
@@ -47,6 +47,7 @@ type ExecutionContext struct {
 	SystemContext   string
 	GraphContext    string
 	HitCount        int
+	Citations       []any // from the last retrieval node
 	History         []clients.ChatMessage
 	MemoryContext   string
 	DirectReply     string // set when a message node is the terminal
@@ -241,7 +242,7 @@ func execRetrieval(ctx context.Context, deps ExecutionDeps, tenantID, kbID strin
 	if deps.Search == nil {
 		return
 	}
-	ctxText, hitCount, graphCtx, err := deps.Search(ctx, tenantID, kbID, ec.Query, topK, rerank, rerankModelID, useGraph)
+	ctxText, hitCount, graphCtx, cits, err := deps.Search(ctx, tenantID, kbID, ec.Query, topK, rerank, rerankModelID, useGraph)
 	if err != nil {
 		emit(ExecutionEvent{Phase: EvWarning, Warning: "Retrieval failed; answering without context."})
 		return
@@ -249,6 +250,7 @@ func execRetrieval(ctx context.Context, deps ExecutionDeps, tenantID, kbID strin
 	ec.SystemContext = ctxText
 	ec.HitCount = hitCount
 	ec.GraphContext = graphCtx
+	ec.Citations = cits
 }
 
 // execClassifierWithDetail classifies the query and returns the target node ID

@@ -387,7 +387,10 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	// Documents (nested under KB).
 	docRepo := doc.NewRepo(deps.DB)
 	embedResolver := embedding.NewResolver(embedRepo, nil)
-	docEventBus := doc.NewEventBus()
+	// Redis relay: the worker publishes doc events to Redis; this goroutine
+	// feeds them to local SSE subscribers.
+	docEventBus := doc.NewEventBus().WithRedis(deps.Redis)
+	go docEventBus.RelayRedis(context.Background())
 	docSvc := doc.NewService(docRepo, kbRepo, deps.MinIO, deps.cfg.MinIO.Bucket, deps.Asynq, deps.Vector, embedResolver).
 		WithQuotaChecker(quotaChecker).
 		WithEventBus(docEventBus)
@@ -415,7 +418,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	llmGrp := protected.Group("/llm-models")
 	llmGrp.Get("/", llmHandler.List)
 	llmGrp.Get("/:id", llmHandler.Get)
-	llmGrp.Post("/:id/test", llmHandler.Test)
+	llmGrp.Post("/:id/test", middleware.AdminOnly(), llmHandler.Test)
 	llmGrp.Post("/", middleware.AdminOnly(), llmHandler.Create)
 	llmGrp.Put("/:id", middleware.AdminOnly(), llmHandler.Update)
 	llmGrp.Delete("/:id", middleware.AdminOnly(), llmHandler.Delete)
@@ -426,7 +429,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	embedGrp := protected.Group("/embedding-models")
 	embedGrp.Get("/", embedHandler.List)
 	embedGrp.Get("/:id", embedHandler.Get)
-	embedGrp.Post("/:id/test", embedHandler.Test)
+	embedGrp.Post("/:id/test", middleware.AdminOnly(), embedHandler.Test)
 	embedGrp.Post("/", middleware.AdminOnly(), embedHandler.Create)
 	embedGrp.Put("/:id", middleware.AdminOnly(), embedHandler.Update)
 	embedGrp.Delete("/:id", middleware.AdminOnly(), embedHandler.Delete)
@@ -439,7 +442,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	rerankGrp := protected.Group("/rerank-models")
 	rerankGrp.Get("/", rerankHandler.List)
 	rerankGrp.Get("/:id", rerankHandler.Get)
-	rerankGrp.Post("/:id/test", rerankHandler.Test)
+	rerankGrp.Post("/:id/test", middleware.AdminOnly(), rerankHandler.Test)
 	rerankGrp.Post("/", middleware.AdminOnly(), rerankHandler.Create)
 	rerankGrp.Put("/:id", middleware.AdminOnly(), rerankHandler.Update)
 	rerankGrp.Delete("/:id", middleware.AdminOnly(), rerankHandler.Delete)
@@ -483,8 +486,8 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 			}
 			return &def, nil
 		}).
-		WithMemoryContext(func(ctx context.Context, tenantID, kbID string) (string, error) {
-			return memorySvc.BuildContext(ctx, tenantID, kbID, 5)
+		WithMemoryContext(func(ctx context.Context, tenantID, userID, kbID string) (string, error) {
+			return memorySvc.BuildContext(ctx, tenantID, userID, kbID, 5)
 		}).
 		WithAutoMemory(func(tenantID, convID string) {
 			// Site-level kill switch: when auto memory is disabled, skip the

@@ -152,6 +152,15 @@ export default function KBDetailPage() {
     };
   }, [hasPendingDocs]);
 
+  // Polling fallback: event delivery is best-effort (pub/sub), so a lost
+  // terminal event would leave the list stuck in a processing state.
+  // Re-fetch the list every 15s while anything is still in flight.
+  useEffect(() => {
+    if (!hasPendingDocs) return;
+    const id = setInterval(() => mutate(), 15000);
+    return () => clearInterval(id);
+  }, [hasPendingDocs, mutate]);
+
   async function onUpload(files: FileList | null) {
     if (!files || files.length === 0) return;
     // Lazy embedding requirement: a KB created without an embedding model

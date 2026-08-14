@@ -120,7 +120,10 @@ func RunWorker(cfg *config.Config) error {
 	kbRepo := kb.NewRepo(deps.DB)
 	embedRepo := embedding.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.JWTSecret))
 	embedResolver := embedding.NewResolver(embedRepo, nil)
-	docSvc := doc.NewService(docRepo, kbRepo, deps.MinIO, deps.cfg.MinIO.Bucket, deps.Asynq, deps.Vector, embedResolver)
+	// The worker's doc service publishes status events through Redis so the
+	// API process (which owns the SSE connections) can relay them.
+	docSvc := doc.NewService(docRepo, kbRepo, deps.MinIO, deps.cfg.MinIO.Bucket, deps.Asynq, deps.Vector, embedResolver).
+		WithEventBus(doc.NewEventBus().WithRedis(deps.Redis))
 	pipelineRepo := pipeline.NewRepo(deps.DB)
 	pipelineSvc := pipeline.NewService(pipelineRepo, func(tenantID, kbID string) (pipeline.KBDefaults, error) {
 		k, err := kbRepo.FindByID(tenantID, kbID)

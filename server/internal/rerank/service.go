@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"ollmo/ollmo/pkg/clients"
+	"ollmo/ollmo/pkg/crypto"
 	"ollmo/ollmo/pkg/errs"
 )
 
@@ -59,6 +60,9 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID string, in Creat
 	if in.Endpoint == "" {
 		return nil, errs.BadRequest("endpoint is required")
 	}
+	if err := clients.ValidateEndpoint(in.Endpoint); err != nil {
+		return nil, errs.BadRequest(err.Error())
+	}
 	p := &RerankModel{
 		ID:        uuid.NewString(),
 		TenantID:  tenantID,
@@ -79,11 +83,16 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID string, in Creat
 			log.Printf("[rerank] clear default failed tenant=%s provider=%s: %v", tenantID, p.ID, err)
 		}
 	}
+	p.APIKey = crypto.MaskSecret(p.APIKey)
 	return p, nil
 }
 
 func (s *Service) Get(ctx context.Context, tenantID, id string) (*RerankModel, error) {
-	return s.repo.FindByID(tenantID, id)
+	p, err := s.repo.FindByID(tenantID, id)
+	if p != nil {
+		p.APIKey = crypto.MaskSecret(p.APIKey)
+	}
+	return p, err
 }
 
 func (s *Service) List(ctx context.Context, tenantID string, page, size int) ([]*RerankModel, int64, error) {
@@ -93,7 +102,14 @@ func (s *Service) List(ctx context.Context, tenantID string, page, size int) ([]
 	if size <= 0 || size > 100 {
 		size = 20
 	}
-	return s.repo.List(tenantID, page, size)
+	items, total, err := s.repo.List(tenantID, page, size)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, p := range items {
+		p.APIKey = crypto.MaskSecret(p.APIKey)
+	}
+	return items, total, nil
 }
 
 func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInput) (*RerankModel, error) {
@@ -105,9 +121,14 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInpu
 		p.Name = *in.Name
 	}
 	if in.Endpoint != nil {
+		if err := clients.ValidateEndpoint(*in.Endpoint); err != nil {
+			return nil, errs.BadRequest(err.Error())
+		}
 		p.Endpoint = *in.Endpoint
 	}
-	if in.APIKey != nil {
+	// Empty or the masked form of the current key means "unchanged", so a
+	// client echoing back the masked value never corrupts the stored secret.
+	if in.APIKey != nil && *in.APIKey != "" && *in.APIKey != crypto.MaskSecret(p.APIKey) {
 		p.APIKey = *in.APIKey
 	}
 	if in.Model != nil {
@@ -133,6 +154,7 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInpu
 			log.Printf("[rerank] clear default failed tenant=%s provider=%s: %v", tenantID, p.ID, err)
 		}
 	}
+	p.APIKey = crypto.MaskSecret(p.APIKey)
 	return p, nil
 }
 

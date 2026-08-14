@@ -21,19 +21,19 @@ import (
 // tenantID/kbID/query from the surrounding scope.
 func (s *Service) graphDeps(tenantID, kbID, query string) agent.ExecutionDeps {
 	return agent.ExecutionDeps{
-		Search: func(ctx context.Context, tid, kid, q string, topK int, rerank bool, rerankModelID string, useGraph bool) (string, int, string, error) {
+		Search: func(ctx context.Context, tid, kid, q string, topK int, rerank bool, rerankModelID string, useGraph bool) (string, int, string, []any, error) {
 			r, err := s.searchSvc.Search(ctx, tid, kid, search.SearchRequest{
 				Query: q, TopK: topK, Rerank: &rerank, RerankModelID: rerankModelID,
 			})
 			if err != nil {
-				return "", 0, "", err
+				return "", 0, "", nil, err
 			}
-			ctxText, _ := formatContext(r.Hits)
+			ctxText, cits := formatContext(r.Hits)
 			graphCtx := r.GraphContext
 			if !useGraph {
 				graphCtx = ""
 			}
-			return ctxText, len(r.Hits), graphCtx, nil
+			return ctxText, len(r.Hits), graphCtx, citationsToAny(cits), nil
 		},
 		ResolveLLM: func(ctx context.Context, tid, modelID string) (string, string, string, error) {
 			p, err := s.resolveProvider(ctx, tid, modelID)
@@ -158,7 +158,7 @@ func (s *Service) runStream(
 	// This supports classifier/condition/message routing. Falls back to the
 	// flat ExecutionConfig path when no definition is wired.
 	if def := s.loadAgentDefinition(ctx, tenantID, conv.KbID); def != nil {
-		s.runGraph(ctx, tenantID, conv.KbID, conv.ID, query, in.Message, userMsg.ID, def, provider, out, true)
+		s.runGraph(ctx, tenantID, conv.OwnerID, conv.KbID, conv.ID, query, in.Message, userMsg.ID, def, provider, out, true)
 		return
 	}
 
@@ -199,7 +199,9 @@ func (s *Service) runStream(
 	if !cfg.UseGraph {
 		graphCtx = ""
 	}
-	memoryCtx := s.loadMemoryContext(ctx, tenantID, conv.KbID)
+	// conv.OwnerID is the chatting user (Stream resolves the conversation
+	// via FindConvOwned), so memories stay scoped per user on shared KBs.
+	memoryCtx := s.loadMemoryContext(ctx, tenantID, conv.OwnerID, conv.KbID)
 	msgs := buildPrompt(systemContext, graphCtx, memoryCtx, history, in.Message, userMsg.ID, cfg.SystemPrompt)
 
 	content, reasoning, usage, generateMs, streamErr, cancelled := s.streamLLM(ctx, out, provider, cfg, msgs)
@@ -234,7 +236,7 @@ func (s *Service) runStream(
 // false for TestStream).
 func (s *Service) runGraph(
 	ctx context.Context,
-	tenantID, kbID, convID, query, userMessage, excludeMsgID string,
+	tenantID, userID, kbID, convID, query, userMessage, excludeMsgID string,
 	def *agent.Definition,
 	provider *llm.LLMModel,
 	out chan<- StreamReply,
@@ -265,11 +267,10 @@ func (s *Service) runGraph(
 		Query:   query,
 		History: histMsgs,
 	}
-	ec.MemoryContext = s.loadMemoryContext(ctx, tenantID, kbID)
+	ec.MemoryContext = s.loadMemoryContext(ctx, tenantID, userID, kbID)
 
 	var retrieveMs int
 	retrieveStart := time.Now()
-	var cits []Citation
 
 	terminal := agent.Execute(ctx, def, deps, tenantID, kbID, ec, func(ev agent.ExecutionEvent) {
 		if ev.Phase == agent.EvWarning && ev.Warning != "" {
@@ -281,9 +282,7 @@ func (s *Service) runGraph(
 	})
 	retrieveMs = int(time.Since(retrieveStart).Milliseconds())
 
-	// Build citations from the context's hit count if retrieval ran.
-	// (The graph executor stores formatted text, not raw hits; citations
-	// are empty in graph mode — the retrieve event carries them.)
+	cits := citationsFromAny(ec.Citations)
 	if !send(ctx, out, StreamReply{Phase: PhaseRetrieve, Citations: cits}) {
 		return
 	}
@@ -414,7 +413,7 @@ func (s *Service) resolveProvider(ctx context.Context, tenantID, providerID stri
 // runStream via streamLLM; only persistence and history loading differ.
 func (s *Service) testStream(
 	ctx context.Context,
-	tenantID, kbID, query string,
+	tenantID, userID, kbID, query string,
 	provider *llm.LLMModel,
 	out chan<- StreamReply,
 	cfg agent.ExecutionConfig,
@@ -431,7 +430,7 @@ func (s *Service) testStream(
 
 	// Graph-based execution when a definition is available.
 	if def := s.loadAgentDefinition(ctx, tenantID, kbID); def != nil {
-		s.runGraph(ctx, tenantID, kbID, "", query, query, "", def, provider, out, false)
+		s.runGraph(ctx, tenantID, userID, kbID, "", query, query, "", def, provider, out, false)
 		return
 	}
 
@@ -464,7 +463,7 @@ func (s *Service) testStream(
 	if !cfg.UseGraph {
 		graphCtx = ""
 	}
-	memoryCtx := s.loadMemoryContext(ctx, tenantID, kbID)
+	memoryCtx := s.loadMemoryContext(ctx, tenantID, userID, kbID)
 	msgs := buildPrompt(systemContext, graphCtx, memoryCtx, nil, query, "", cfg.SystemPrompt)
 
 	_, _, usage, generateMs, streamErr, cancelled := s.streamLLM(ctx, out, provider, cfg, msgs)

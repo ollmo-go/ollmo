@@ -28,13 +28,15 @@ func (h *Handler) Summarize(c *fiber.Ctx) error {
 	return response.OK(c, m)
 }
 
-// List returns memory summaries for a KB.
+// List returns the caller's memory summaries for a KB. Memories are scoped
+// per user so shared-KB members only see their own.
 func (h *Handler) List(c *fiber.Ctx) error {
 	tenantID := middleware.TenantID(c)
+	userID := middleware.UserID(c)
 	kbID := c.Params("kbId")
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	size, _ := strconv.Atoi(c.Query("size", "20"))
-	items, total, err := h.svc.List(tenantID, kbID, page, size)
+	items, total, err := h.svc.List(tenantID, userID, kbID, page, size)
 	if err != nil {
 		return response.Fail(c, err)
 	}

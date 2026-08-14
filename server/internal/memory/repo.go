@@ -23,11 +23,13 @@ func (r *Repo) FindByConversation(tenantID, convID string) (*Memory, error) {
 	return &m, nil
 }
 
-// ListByKB returns all memory summaries for a KB, most recent first.
-func (r *Repo) ListByKB(tenantID, kbID string, page, size int) ([]*Memory, int64, error) {
+// ListByKB returns a user's memory summaries for a KB, most recent first.
+// Memories are scoped per user: on shared KBs, one member's summaries must
+// not surface to another.
+func (r *Repo) ListByKB(tenantID, userID, kbID string, page, size int) ([]*Memory, int64, error) {
 	var items []*Memory
 	var total int64
-	q := r.db.Model(&Memory{}).Where("tenant_id = ? AND kb_id = ?", tenantID, kbID)
+	q := r.db.Model(&Memory{}).Where("tenant_id = ? AND user_id = ? AND kb_id = ?", tenantID, userID, kbID)
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -36,11 +38,13 @@ func (r *Repo) ListByKB(tenantID, kbID string, page, size int) ([]*Memory, int64
 	return items, total, err
 }
 
-// ListActiveByKB returns active memories for a KB, most recent first. Used
-// to build prompt context; disabled/forgotten memories are excluded.
-func (r *Repo) ListActiveByKB(tenantID, kbID string, limit int) ([]*Memory, error) {
+// ListActiveByKB returns a user's active memories for a KB, most recent
+// first. Used to build prompt context; disabled/forgotten memories are
+// excluded, and summaries from other members of a shared KB never leak
+// into the prompt.
+func (r *Repo) ListActiveByKB(tenantID, userID, kbID string, limit int) ([]*Memory, error) {
 	var items []*Memory
-	err := r.db.Where("tenant_id = ? AND kb_id = ? AND status = ?", tenantID, kbID, StatusActive).
+	err := r.db.Where("tenant_id = ? AND user_id = ? AND kb_id = ? AND status = ?", tenantID, userID, kbID, StatusActive).
 		Order("created_at DESC").Limit(limit).Find(&items).Error
 	return items, err
 }

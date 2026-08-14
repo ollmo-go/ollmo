@@ -64,7 +64,7 @@ func (c *EmbeddingClient) Embed(ctx context.Context, model string, inputs []stri
 
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("embedding http %d: %s", resp.StatusCode, b)
+		return nil, fmt.Errorf("embedding http %d: %s", resp.StatusCode, Snippet(b))
 	}
 
 	var out embeddingResponse
