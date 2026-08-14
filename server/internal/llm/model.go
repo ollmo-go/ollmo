@@ -30,7 +30,10 @@ type LLMModel struct {
 	Model       string    `gorm:"size:128;not null" json:"model"`
 	Temperature float64   `gorm:"not null;default:0.7" json:"temperature"`
 	MaxTokens   int       `gorm:"not null;default:2048" json:"max_tokens"`
-	TopP        float64   `gorm:"not null;default:1" json:"top_p"`
+	// ContextLength is the model's input+output window in tokens. 0 means
+	// unknown; the chat service then assumes DefaultContextLength.
+	ContextLength int     `gorm:"not null;default:0" json:"context_length"`
+	TopP          float64 `gorm:"not null;default:1" json:"top_p"`
 	IsDefault      bool       `gorm:"not null;default:false" json:"is_default"`
 	OwnerID        string     `gorm:"size:36;index;not null" json:"owner_id"`
 	Status         string     `gorm:"size:32;not null;default:active" json:"status"`

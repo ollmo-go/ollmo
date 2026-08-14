@@ -16,6 +16,33 @@ import (
 	"ollmo/ollmo/pkg/errs"
 )
 
+// Context-budget knobs. The prompt must fit the provider's window before it
+// is sent; otherwise the request fails provider-side with an opaque error.
+const (
+	// defaultContextLength is assumed when a provider has no ContextLength
+	// configured; conservative for current mainstream models.
+	defaultContextLength = 32768
+	// promptSafetyMargin absorbs estimator error plus message framing.
+	promptSafetyMargin = 512
+	// minPromptBudget guards against degenerate window/reserve combos.
+	minPromptBudget = 512
+)
+
+// promptBudget converts the provider's window into an estimated-token budget
+// for prompt assembly: window minus the output reserve (MaxTokens) minus a
+// safety margin. buildPrompt trims graph/memory/history to fit this budget.
+func promptBudget(p *llm.LLMModel) int {
+	window := p.ContextLength
+	if window <= 0 {
+		window = defaultContextLength
+	}
+	b := window - p.MaxTokens - promptSafetyMargin
+	if b < minPromptBudget {
+		b = minPromptBudget
+	}
+	return b
+}
+
 // graphDeps builds the ExecutionDeps for the graph executor from the chat
 // service's wired collaborators. Called once per stream; the closures capture
 // tenantID/kbID/query from the surrounding scope.
@@ -185,6 +212,15 @@ func (s *Service) runStream(
 		res = &search.SearchResult{}
 	}
 	retrieveMs := int(time.Since(retrieveStart).Milliseconds())
+
+	// Trim the retrieval context to its budget share BEFORE formatting so
+	// citations stay consistent with what actually reaches the model.
+	budget := promptBudget(provider)
+	ctxTrimmed := false
+	if hits, trimmed := trimHitsToBudget(res.Hits, int(float64(budget)*retrievalShare)); trimmed {
+		res.Hits = hits
+		ctxTrimmed = true
+	}
 	systemContext, cits := formatContext(res.Hits)
 	if !send(ctx, out, StreamReply{Phase: PhaseRetrieve, Citations: cits}) {
 		return
@@ -202,7 +238,12 @@ func (s *Service) runStream(
 	// conv.OwnerID is the chatting user (Stream resolves the conversation
 	// via FindConvOwned), so memories stay scoped per user on shared KBs.
 	memoryCtx := s.loadMemoryContext(ctx, tenantID, conv.OwnerID, conv.KbID)
-	msgs := buildPrompt(systemContext, graphCtx, memoryCtx, history, in.Message, userMsg.ID, cfg.SystemPrompt)
+	msgs, promptTrimmed := buildPrompt(systemContext, graphCtx, memoryCtx, history, in.Message, userMsg.ID, cfg.SystemPrompt, budget)
+	if ctxTrimmed || promptTrimmed {
+		if !send(ctx, out, StreamReply{Phase: PhaseWarning, Warning: "Context trimmed to fit the model window."}) {
+			return
+		}
+	}
 
 	content, reasoning, usage, generateMs, streamErr, cancelled := s.streamLLM(ctx, out, provider, cfg, msgs)
 	totalMs := int(time.Since(totalStart).Milliseconds())
@@ -328,7 +369,13 @@ func (s *Service) runGraph(
 				llmProvider = p
 			}
 		}
-		msgs := buildPrompt(ec.SystemContext, ec.GraphContext, ec.MemoryContext, history, userMessage, excludeMsgID, cfg.SystemPrompt)
+		budget := promptBudget(llmProvider)
+		msgs, promptTrimmed := buildPrompt(ec.SystemContext, ec.GraphContext, ec.MemoryContext, history, userMessage, excludeMsgID, cfg.SystemPrompt, budget)
+		if promptTrimmed {
+			if !send(ctx, out, StreamReply{Phase: PhaseWarning, Warning: "Context trimmed to fit the model window."}) {
+				return
+			}
+		}
 		content, reasoning, usage, generateMs, streamErr, cancelled := s.streamLLM(ctx, out, llmProvider, *cfg, msgs)
 		totalMs := int(time.Since(totalStart).Milliseconds())
 
@@ -459,12 +506,26 @@ func (s *Service) testStream(
 		return
 	}
 
+	budget := promptBudget(provider)
+	if hits, trimmed := trimHitsToBudget(res.Hits, int(float64(budget)*retrievalShare)); trimmed {
+		res.Hits = hits
+		systemContext, cits = formatContext(res.Hits)
+		if !send(ctx, out, StreamReply{Phase: PhaseRetrieve, Citations: cits}) {
+			return
+		}
+	}
+
 	graphCtx := res.GraphContext
 	if !cfg.UseGraph {
 		graphCtx = ""
 	}
 	memoryCtx := s.loadMemoryContext(ctx, tenantID, userID, kbID)
-	msgs := buildPrompt(systemContext, graphCtx, memoryCtx, nil, query, "", cfg.SystemPrompt)
+	msgs, promptTrimmed := buildPrompt(systemContext, graphCtx, memoryCtx, nil, query, "", cfg.SystemPrompt, budget)
+	if promptTrimmed {
+		if !send(ctx, out, StreamReply{Phase: PhaseWarning, Warning: "Context trimmed to fit the model window."}) {
+			return
+		}
+	}
 
 	_, _, usage, generateMs, streamErr, cancelled := s.streamLLM(ctx, out, provider, cfg, msgs)
 	if streamErr != "" || cancelled {

@@ -7,6 +7,19 @@ import (
 
 	"ollmo/ollmo/internal/search"
 	"ollmo/ollmo/pkg/clients"
+	"ollmo/ollmo/pkg/tokener"
+)
+
+// Context budget policy. The window is split by priority: retrieval context
+// is the main payload; graph/memory get small fixed shares; history consumes
+// whatever is left, newest first. System prompt and query are always kept.
+const (
+	retrievalShare = 0.60
+	graphShare     = 0.10
+	memoryShare    = 0.10
+	// historyShare is the remainder (0.20) plus any budget the other
+	// sections did not use; it is computed, not a constant.
+	msgOverhead = 4 // per-message role/formatting tokens charged on top of content
 )
 
 // buildPrompt assembles the system message (with retrieved context), the
@@ -17,9 +30,14 @@ import (
 // memoryContext is appended so the LLM has cross-session context.
 // customSystem overrides the default system prompt when non-empty, letting
 // the agent canvas customize the assistant's behavior per KB.
-func buildPrompt(systemContext, graphContext, memoryContext string, history []*Message, query, excludeMsgID, customSystem string) []clients.ChatMessage {
-	msgs := make([]clients.ChatMessage, 0, len(history)+2)
-
+//
+// budget is the max estimated prompt tokens for the whole message list
+// (window minus output reserve and safety margin); budget <= 0 disables
+// trimming. When anything is trimmed to fit, the second return value is true
+// so callers can surface a warning. Priority: system prompt and query are
+// always kept; graph and memory are truncated to small shares; history is
+// filled newest-first with the remainder.
+func buildPrompt(systemContext, graphContext, memoryContext string, history []*Message, query, excludeMsgID, customSystem string, budget int) ([]clients.ChatMessage, bool) {
 	sys := customSystem
 	if sys == "" {
 		sys = "You are a helpful assistant. Answer the user's question using the provided context. " +
@@ -46,14 +64,31 @@ func buildPrompt(systemContext, graphContext, memoryContext string, history []*M
 	if !contextPlaced && fenced != "" {
 		sys += "\n\n" + fenced
 	}
+
+	// Graph and memory get small fixed shares of the budget; both are
+	// auxiliary context and may be char-truncated (estimate-based) without
+	// breaking correctness.
+	trimmed := false
+	if budget > 0 {
+		if t := tokener.Truncate(graphContext, int(float64(budget)*graphShare)); t != graphContext {
+			graphContext, trimmed = t, true
+		}
+		if t := tokener.Truncate(memoryContext, int(float64(budget)*memoryShare)); t != memoryContext {
+			memoryContext, trimmed = t, true
+		}
+	}
 	if graphContext != "" {
 		sys += "\n\nKnowledge graph:\n" + graphContext
 	}
 	if memoryContext != "" {
 		sys += "\n\n" + memoryContext
 	}
+	msgs := make([]clients.ChatMessage, 0, len(history)+2)
 	msgs = append(msgs, clients.ChatMessage{Role: RoleSystem, Content: sys})
 
+	// Pre-filter history to user/assistant turns, excluding the freshly
+	// persisted user message (it is re-added as the final query).
+	eligible := make([]*Message, 0, len(history))
 	for _, m := range history {
 		if m.Role != RoleUser && m.Role != RoleAssistant {
 			continue
@@ -61,10 +96,56 @@ func buildPrompt(systemContext, graphContext, memoryContext string, history []*M
 		if m.ID == excludeMsgID {
 			continue
 		}
+		eligible = append(eligible, m)
+	}
+
+	// History consumes whatever budget is left after the system message and
+	// query, filling from the newest backwards; older messages are dropped
+	// first. eligible is in chronological order.
+	keep := eligible
+	if budget > 0 {
+		keep = make([]*Message, 0, len(eligible))
+		remaining := budget - tokener.Estimate(sys) - tokener.Estimate(query) - msgOverhead
+		for i := len(eligible) - 1; i >= 0; i-- {
+			m := eligible[i]
+			cost := tokener.Estimate(m.Content) + msgOverhead
+			if remaining-cost < 0 {
+				// Stop at the first message that does not fit: skipping it
+				// but keeping older ones would punch a hole in the middle of
+				// the conversation and lose the thread.
+				trimmed = true
+				break
+			}
+			remaining -= cost
+			keep = append(keep, m)
+		}
+		for i, j := 0, len(keep)-1; i < j; i, j = i+1, j-1 {
+			keep[i], keep[j] = keep[j], keep[i]
+		}
+	}
+	for _, m := range keep {
 		msgs = append(msgs, clients.ChatMessage{Role: m.Role, Content: m.Content})
 	}
 	msgs = append(msgs, clients.ChatMessage{Role: RoleUser, Content: query})
-	return msgs
+	return msgs, trimmed
+}
+
+// trimHitsToBudget drops the lowest-ranked tail of the search hits until the
+// formatted context fits maxTokens. Hits arrive ranked best-first, so the
+// strongest evidence survives. Returns the trimmed slice and whether any hit
+// was dropped; callers must re-derive citations from the result.
+func trimHitsToBudget(hits []search.SearchHit, maxTokens int) ([]search.SearchHit, bool) {
+	if maxTokens <= 0 || len(hits) == 0 {
+		return hits, false
+	}
+	total := 0
+	for i, h := range hits {
+		total += tokener.Estimate(h.Content) + tokener.Estimate(h.DocName) + 8 // "[n] (from …)" header
+		if total > maxTokens {
+			return hits[:i], true
+		}
+	}
+	return hits, false
 }
 
 // Fence markers around retrieved content. buildPrompt wraps the context

@@ -33,6 +33,11 @@ func NewService(kbRepo *kb.Repo, docRepo *doc.Repo, embedder embedding.Embedder,
 	return &Service{kbRepo: kbRepo, docRepo: docRepo, embedder: embedder, store: store, reranker: reranker, graphSvc: graphSvc}
 }
 
+// MaxTopK caps retrieval breadth for every caller (chat, agent nodes,
+// retrieval test). TopK is often client-supplied; unbounded values inflate
+// the prompt and multiply rerank API cost (candidates are fetched at TopK*3).
+const MaxTopK = 20
+
 // Search runs retrieval against one KB. The KB id pins the embedding model
 // and the Milvus collection, so the caller must pass the same kb_id used at
 // upload time.
@@ -42,6 +47,9 @@ func (s *Service) Search(ctx context.Context, tenantID, kbID string, req SearchR
 	}
 	if req.TopK <= 0 {
 		req.TopK = 10
+	}
+	if req.TopK > MaxTopK {
+		req.TopK = MaxTopK
 	}
 
 	kbCfg, err := s.kbRepo.FindByID(tenantID, kbID)

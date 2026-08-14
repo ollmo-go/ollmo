@@ -61,7 +61,7 @@ type Service struct {
 	searchSvc *search.Service
 	llmRepo   *llm.Repo
 	llm       *clients.LLMClient
-	history   int // messages of context to pass to the LLM
+	history   int // max messages fetched for context; token budget trims further
 	agentCfg  AgentConfigFetcher
 	agentDef  AgentDefinitionFetcher
 	memCtx    MemoryContextFetcher
@@ -71,7 +71,7 @@ type Service struct {
 }
 
 func NewService(repo *Repo, searchSvc *search.Service, llmRepo *llm.Repo, llm *clients.LLMClient) *Service {
-	return &Service{repo: repo, searchSvc: searchSvc, llmRepo: llmRepo, llm: llm, history: 10}
+	return &Service{repo: repo, searchSvc: searchSvc, llmRepo: llmRepo, llm: llm, history: 30}
 }
 
 // WithAgentConfig wires the agent config fetcher. When set, each Stream call

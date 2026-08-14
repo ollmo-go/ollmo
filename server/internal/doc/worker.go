@@ -21,6 +21,7 @@ import (
 	"ollmo/ollmo/pkg/chunker"
 	"ollmo/ollmo/pkg/clients"
 	"ollmo/ollmo/pkg/localparser"
+	"ollmo/ollmo/pkg/tokener"
 	"ollmo/ollmo/pkg/vector"
 )
 
@@ -186,12 +187,13 @@ func (w *Worker) HandleParse(ctx context.Context, t *asynq.Task) error {
 	chunkModels := make([]*Chunk, 0, len(chunks))
 	for i, c := range chunks {
 		chunkModels = append(chunkModels, &Chunk{
-			ID:       uuid.NewString(),
-			TenantID: p.TenantID,
-			KbID:     p.KbID,
-			DocID:    p.DocID,
-			Index:    i,
-			Content:  c,
+			ID:         uuid.NewString(),
+			TenantID:   p.TenantID,
+			KbID:       p.KbID,
+			DocID:      p.DocID,
+			Index:      i,
+			Content:    c,
+			TokenCount: tokener.Estimate(c),
 		})
 	}
 	// Atomically swap the old chunk set for the new one. Old chunks are only

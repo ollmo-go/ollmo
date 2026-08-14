@@ -30,6 +30,7 @@ type CreateInput struct {
 	Model       string  `json:"model"`
 	Temperature float64 `json:"temperature"`
 	MaxTokens   int     `json:"max_tokens"`
+	ContextLen  int     `json:"context_length"`
 	TopP        float64 `json:"top_p"`
 	IsDefault   bool    `json:"is_default"`
 }
@@ -42,6 +43,7 @@ type UpdateInput struct {
 	Model       *string  `json:"model"`
 	Temperature *float64 `json:"temperature"`
 	MaxTokens   *int     `json:"max_tokens"`
+	ContextLen  *int     `json:"context_length"`
 	TopP        *float64 `json:"top_p"`
 	Status      *string  `json:"status"`
 	IsDefault   *bool    `json:"is_default"`
@@ -82,19 +84,20 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID string, in Creat
 	}
 
 	p := &LLMModel{
-		ID:          uuid.NewString(),
-		TenantID:    tenantID,
-		Name:        in.Name,
-		Provider:    in.Provider,
-		Endpoint:    in.Endpoint,
-		APIKey:      in.APIKey,
-		Model:       in.Model,
-		Temperature: in.Temperature,
-		MaxTokens:   in.MaxTokens,
-		TopP:        in.TopP,
-		IsDefault:   in.IsDefault,
-		OwnerID:     ownerID,
-		Status:      StatusActive,
+		ID:            uuid.NewString(),
+		TenantID:      tenantID,
+		Name:          in.Name,
+		Provider:      in.Provider,
+		Endpoint:      in.Endpoint,
+		APIKey:        in.APIKey,
+		Model:         in.Model,
+		Temperature:   in.Temperature,
+		MaxTokens:     in.MaxTokens,
+		ContextLength: in.ContextLen,
+		TopP:          in.TopP,
+		IsDefault:     in.IsDefault,
+		OwnerID:       ownerID,
+		Status:        StatusActive,
 	}
 	if err := s.repo.Create(p); err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, "create llm provider", err)
@@ -174,6 +177,9 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInpu
 	}
 	if in.MaxTokens != nil {
 		p.MaxTokens = *in.MaxTokens
+	}
+	if in.ContextLen != nil {
+		p.ContextLength = *in.ContextLen
 	}
 	if in.TopP != nil {
 		p.TopP = *in.TopP
