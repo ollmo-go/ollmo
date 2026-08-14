@@ -58,9 +58,15 @@ func RunAPI(cfg *config.Config) error {
 	defer deps.Milvus.Close()
 
 	app := fiber.New(fiber.Config{
-		AppName:      "ollmo-api",
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		AppName:     "ollmo-api",
+		ReadTimeout: 30 * time.Second,
+		// WriteTimeout stays 0 (unlimited): fasthttp applies it to the
+		// ENTIRE response write, including SSE LLM streams that legitimately
+		// run for minutes. The previous 60s cap cut off long generations
+		// server-side while the LLM client (5min timeout) kept streaming.
+		// Long-lived streams are bounded by client disconnects, which cancel
+		// the request context and terminate the stream goroutine.
+		WriteTimeout: 0,
 		BodyLimit:    50 * 1024 * 1024, // 50MB for document uploads
 	})
 	app.Use(recover.New())

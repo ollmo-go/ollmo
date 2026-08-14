@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -188,7 +189,10 @@ func (h *Handler) TestChat(c *fiber.Ctx) error {
 }
 
 // writeSSE sets SSE headers and writes the channel as a stream of `data:`
-// lines. Shared by Stream and TestChat.
+// lines. Shared by Stream and TestChat. A 30s comment heartbeat keeps
+// intermediaries (nginx, cloud LBs) from closing the connection during long
+// silent gaps (e.g. waiting for the first LLM token); clients ignore
+// non-data lines per the SSE spec.
 func writeSSE(c *fiber.Ctx, ch <-chan StreamReply) {
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
@@ -196,17 +200,32 @@ func writeSSE(c *fiber.Ctx, ch <-chan StreamReply) {
 	c.Set("X-Accel-Buffering", "no")
 	c.Context().SetContentType("text/event-stream; charset=utf-8")
 	c.Context().Response.SetBodyStreamWriter(func(w *bufio.Writer) {
-		for reply := range ch {
-			b, err := json.Marshal(reply)
-			if err != nil {
-				log.Printf("[chat] sse marshal failed: %v", err)
-				continue
-			}
-			_, _ = w.WriteString("data: ")
-			_, _ = w.Write(b)
-			_, _ = w.WriteString("\n\n")
-			if err := w.Flush(); err != nil {
-				return
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case reply, ok := <-ch:
+				if !ok {
+					return
+				}
+				b, err := json.Marshal(reply)
+				if err != nil {
+					log.Printf("[chat] sse marshal failed: %v", err)
+					continue
+				}
+				_, _ = w.WriteString("data: ")
+				_, _ = w.Write(b)
+				_, _ = w.WriteString("\n\n")
+				if err := w.Flush(); err != nil {
+					return
+				}
+			case <-ticker.C:
+				if _, err := w.WriteString(": ping\n\n"); err != nil {
+					return
+				}
+				if err := w.Flush(); err != nil {
+					return
+				}
 			}
 		}
 	})
