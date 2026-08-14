@@ -188,8 +188,12 @@ func (h *Handler) TestChat(c *fiber.Ctx) error {
 	return nil
 }
 
+// sseHeartbeat is the interval between SSE comment heartbeats. A package
+// variable so tests can shorten it.
+var sseHeartbeat = 30 * time.Second
+
 // writeSSE sets SSE headers and writes the channel as a stream of `data:`
-// lines. Shared by Stream and TestChat. A 30s comment heartbeat keeps
+// lines. Shared by Stream and TestChat. A periodic comment heartbeat keeps
 // intermediaries (nginx, cloud LBs) from closing the connection during long
 // silent gaps (e.g. waiting for the first LLM token); clients ignore
 // non-data lines per the SSE spec.
@@ -200,7 +204,7 @@ func writeSSE(c *fiber.Ctx, ch <-chan StreamReply) {
 	c.Set("X-Accel-Buffering", "no")
 	c.Context().SetContentType("text/event-stream; charset=utf-8")
 	c.Context().Response.SetBodyStreamWriter(func(w *bufio.Writer) {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(sseHeartbeat)
 		defer ticker.Stop()
 		for {
 			select {
