@@ -64,18 +64,61 @@ func (s *Service) ExtractFromChunk(ctx context.Context, tenantID, kbID, chunkID,
 	}
 
 	// Persist relations, resolving source/target names to entity ids.
-	for _, rel := range result.Relations {
+	// Endpoints are looked up locally first, then against the KB-wide entity
+	// table so edges between entities extracted from DIFFERENT chunks are
+	// kept; see resolveEntityID. Without the global lookup the graph
+	// degenerated into per-chunk stars and cross-chunk knowledge links were
+	// silently dropped.
+	if err := s.persistRelations(tenantID, kbID, chunkID, result.Relations, entityIDs); err != nil {
+		return err
+	}
+	return nil
+}
+
+// resolveEntityID maps a relation endpoint name to an entity id. Local names
+// (extracted from the current chunk) win; otherwise the KB-wide entity table
+// is consulted (entity extracted from another chunk); as a last resort a stub
+// entity is created so the edge survives and future chunks enrich it via
+// UpsertEntity merging.
+func (s *Service) resolveEntityID(tenantID, kbID, chunkID, name string, local map[string]string) string {
+	if id, ok := local[name]; ok {
+		return id
+	}
+	if entities, err := s.repo.FindByNames(tenantID, kbID, []string{name}); err == nil && len(entities) > 0 {
+		return entities[0].ID
+	}
+	if err := s.repo.UpsertEntity(&Entity{
+		ID:             uuid.NewString(),
+		TenantID:       tenantID,
+		KbID:           kbID,
+		Name:           name,
+		SourceChunkIDs: chunkID,
+		MentionCount:   1,
+	}); err != nil {
+		return ""
+	}
+	entities, err := s.repo.FindByNames(tenantID, kbID, []string{name})
+	if err != nil || len(entities) == 0 {
+		return ""
+	}
+	return entities[0].ID
+}
+
+// persistRelations creates relation rows for the extraction result, resolving
+// endpoint names to entity ids via resolveEntityID.
+func (s *Service) persistRelations(tenantID, kbID, chunkID string, relations []ExtractedRelation, local map[string]string) error {
+	for _, rel := range relations {
 		src := strings.TrimSpace(rel.Source)
 		tgt := strings.TrimSpace(rel.Target)
 		if src == "" || tgt == "" {
 			continue
 		}
-		srcID, ok := entityIDs[src]
-		if !ok {
+		srcID := s.resolveEntityID(tenantID, kbID, chunkID, src, local)
+		if srcID == "" {
 			continue
 		}
-		tgtID, ok := entityIDs[tgt]
-		if !ok {
+		tgtID := s.resolveEntityID(tenantID, kbID, chunkID, tgt, local)
+		if tgtID == "" {
 			continue
 		}
 		r := &Relation{

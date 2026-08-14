@@ -230,10 +230,11 @@ func (r *Repo) DeleteChunk(tenantID, kbID, chunkID string) error {
 	return nil
 }
 
-// SparseSearch runs a MySQL FULLTEXT search (BM25-like) over chunk content
-// scoped to one KB. Results are ranked by MySQL's built-in relevance score.
-// Used as the sparse leg of hybrid retrieval; fused with dense Milvus hits
-// via RRF in the search service.
+// SparseSearch runs a MySQL FULLTEXT search over chunk content scoped to one
+// KB. Results are ranked by InnoDB's relevance score, a TF-IDF variant
+// (TF * IDF^2, no document-length normalization), not BM25. Used as the
+// lexical leg of hybrid retrieval; fused with dense Milvus hits via RRF in
+// the search service.
 func (r *Repo) SparseSearch(ctx context.Context, tenantID, kbID, query string, topK int) ([]vector.SearchHit, error) {
 	if topK <= 0 {
 		topK = 10

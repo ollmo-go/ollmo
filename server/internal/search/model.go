@@ -2,7 +2,7 @@ package search
 
 // SearchRequest is the input for a retrieval query. The query is embedded
 // via the model pinned on the KB for dense Milvus search, and also run
-// through MySQL FULLTEXT for the sparse BM25 leg; the two rank lists are
+// through MySQL FULLTEXT for the lexical leg; the two rank lists are
 // fused via RRF. Rerank toggles the optional cross-encoder rerank leg;
 // when false or the reranker is not configured, results are returned in
 // dense+sparse RRF order. Debug enables intermediate retrieval details

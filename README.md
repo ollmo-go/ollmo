@@ -37,7 +37,7 @@ ollmo converges everything into three steps: **upload documents, ask questions, 
 
 ## Features
 
-- **Hybrid Retrieval** — Dense + sparse vector search on Milvus 2.5+, with KB-level rerank configuration.
+- **Hybrid Retrieval** — Dense vectors on Milvus + lexical matching via MySQL FULLTEXT, fused with RRF, with KB-level rerank configuration.
 - **Multi-Tenancy** — Logical isolation across MySQL, Milvus, and MinIO; every table carries `tenant_id`.
 - **Document Pipeline** — Upload (drag & drop, paste, multi-file) → parse (MinerU / local parser) → chunk → embed → index, fully async via Asynq + Redis.
 - **Streaming Chat** — Real-time SSE streaming with source citations. Doubao-style greeting from agent opening message.
@@ -58,7 +58,7 @@ ollmo converges everything into three steps: **upload documents, ask questions, 
 | Backend | Go 1.26+ / Fiber / GORM |
 | Frontend | Next.js 15 (App Router) / React / shadcn-ui |
 | Database | MySQL 8.0 (utf8mb4) — metadata |
-| Vector DB | Milvus 2.5+ — dense + sparse hybrid retrieval |
+| Vector DB | Milvus 2.5+ — dense vector retrieval |
 | Object Storage | MinIO (S3 compatible) — original docs, parsed output, thumbnails |
 | Task Queue | Asynq + Redis — parsing, embedding, index rebuild, auto-summarization |
 | Document Parser | MinerU (containerized, GPU optional) + local fallback parser |
@@ -89,7 +89,7 @@ ollmo converges everything into three steps: **upload documents, ask questions, 
                                          │
                                 ┌────────▼────────┐
                                 │     Milvus      │
-                                │  dense + sparse │
+                                │ dense (vectors) │
                                 └─────────────────┘
 ```
 
@@ -115,7 +115,7 @@ ollmo/
 │   │   ├── memory/         # Auto-summarization & cross-session context
 │   │   ├── pipeline/       # Ingestion pipeline canvas config
 │   │   ├── rerank/         # Rerank model management
-│   │   ├── search/         # Hybrid retrieval (dense + sparse + rerank)
+│   │   ├── search/         # Hybrid retrieval (dense + lexical + rerank)
 │   │   ├── site/           # Site-wide settings
 │   │   ├── team/           # KB membership & access control
 │   │   ├── tenant/         # Tenant, plan & quota management

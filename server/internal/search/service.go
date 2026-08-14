@@ -15,9 +15,9 @@ import (
 )
 
 // Service orchestrates retrieval for a single KB. It owns the embedding call
-// (query -> vector), the dense Milvus search, the sparse MySQL FULLTEXT
-// (BM25-like) search, RRF fusion across the two rank lists, and optional
-// graph-based entity context from the GraphRAG extraction pass. When a
+// (query -> vector), the dense Milvus search, the lexical MySQL FULLTEXT
+// search (TF-IDF variant ranking), RRF fusion across the two rank lists, and optional
+// graph-based entity context from LLM entity extraction. When a
 // Reranker is configured the fused results are re-scored by a cross-encoder
 // for better precision.
 type Service struct {
@@ -114,7 +114,7 @@ func (s *Service) Search(ctx context.Context, tenantID, kbID string, req SearchR
 		}
 	}
 
-	// 3. sparse search (BM25) via MySQL FULLTEXT on chunk content. Non-fatal:
+	// 3. lexical search via MySQL FULLTEXT on chunk content. Non-fatal:
 	// if the index is missing or the query has no matches, we fall back to
 	// dense-only retrieval so the search still returns results.
 	sparseHits, _ := s.docRepo.SparseSearch(ctx, tenantID, kbID, req.Query, req.TopK*2)
@@ -255,7 +255,7 @@ func (s *Service) SearchDebug(ctx context.Context, tenantID, kbID string, req Se
 	return s.Search(ctx, tenantID, kbID, req)
 }
 
-// toDebugHits converts raw vector hits (dense Milvus or sparse BM25) into the
+// toDebugHits converts raw vector hits (dense Milvus or lexical FULLTEXT) into the
 // JSON-friendly SearchHit form, reusing docNames already loaded for the main
 // hits to avoid extra DB round trips. DocName may be empty for hits whose
 // doc wasn't looked up during the main path.
