@@ -532,7 +532,7 @@ function AgentCanvas() {
           { name: t("agent.cat_chat"), description: t("agent.cat_chat_desc") },
         ] } },
         { id: rId, type: "retrieval", position: { x: 320, y: 60 }, data: { ...DEFAULT_NODE_DATA.retrieval, slug: "retrieval_1" } },
-        { id: cdId, type: "condition", position: { x: 600, y: 60 }, data: { ...DEFAULT_NODE_DATA.condition, variable: "retrieval_1.top_score", value: "0.35" } },
+        { id: cdId, type: "condition", position: { x: 600, y: 60 }, data: { ...DEFAULT_NODE_DATA.condition, variable: "retrieval_1.top_score", operator: ">", value: "0.35" } },
         { id: lId, type: "llm", position: { x: 880, y: 0 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_1", system_prompt: t("agent.template_rag_prompt") } },
         { id: mId, type: "message", position: { x: 880, y: 240 }, data: { ...DEFAULT_NODE_DATA.message, slug: "message_1", text: t("agent.template_default_fallback") } },
         { id: l2Id, type: "llm", position: { x: 320, y: 340 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_2" } },
