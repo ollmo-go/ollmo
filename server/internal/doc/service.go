@@ -132,14 +132,14 @@ func (s *Service) Upload(ctx context.Context, tenantID, ownerID, kbID, filename,
 	return doc, nil
 }
 
-func (s *Service) Get(ctx context.Context, tenantID, id string) (*Document, error) {
-	return s.repo.FindDoc(tenantID, id)
+func (s *Service) Get(ctx context.Context, tenantID, kbID, id string) (*Document, error) {
+	return s.repo.FindDoc(tenantID, kbID, id)
 }
 
 // GetContent returns the parsed document content (markdown/text) stored in
 // MinIO. Used by the document viewer for citation tracing.
-func (s *Service) GetContent(ctx context.Context, tenantID, docID string) (*Document, string, error) {
-	doc, err := s.repo.FindDoc(tenantID, docID)
+func (s *Service) GetContent(ctx context.Context, tenantID, kbID, docID string) (*Document, string, error) {
+	doc, err := s.repo.FindDoc(tenantID, kbID, docID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -168,30 +168,45 @@ func (s *Service) List(ctx context.Context, tenantID, kbID string, page, size in
 	return s.repo.ListDocs(tenantID, kbID, page, size)
 }
 
-func (s *Service) SetEnabled(ctx context.Context, tenantID, id string, enabled bool) error {
-	return s.repo.SetDocEnabled(tenantID, id, enabled)
+func (s *Service) SetEnabled(ctx context.Context, tenantID, kbID, id string, enabled bool) error {
+	return s.repo.SetDocEnabled(tenantID, kbID, id, enabled)
 }
 
-func (s *Service) ListChunks(ctx context.Context, tenantID, docID string, page, size int) ([]*Chunk, error) {
+func (s *Service) ListChunks(ctx context.Context, tenantID, kbID, docID string, page, size int) ([]*Chunk, error) {
 	if page <= 0 {
 		page = 1
 	}
 	if size <= 0 || size > 500 {
 		size = 200
 	}
-	return s.repo.ListChunksByDoc(tenantID, docID, size, (page-1)*size)
+	return s.repo.ListChunksByDoc(tenantID, kbID, docID, size, (page-1)*size)
 }
 
 // ListAllChunksByDoc returns all chunks for a document without pagination.
 // Used by the worker (embedding/extraction) which needs every chunk.
-func (s *Service) ListAllChunksByDoc(ctx context.Context, tenantID, docID string) ([]*Chunk, error) {
-	return s.repo.ListChunksByDoc(tenantID, docID, 0, 0)
+func (s *Service) ListAllChunksByDoc(ctx context.Context, tenantID, kbID, docID string) ([]*Chunk, error) {
+	return s.repo.ListChunksByDoc(tenantID, kbID, docID, 0, 0)
 }
 
-// DeleteChunks removes all chunks for a document. Called by the parse worker
-// before re-chunking so reparse does not leave stale chunk rows.
-func (s *Service) DeleteChunks(ctx context.Context, tenantID, docID string) error {
-	return s.repo.DeleteChunksByDoc(tenantID, docID)
+// ReplaceChunks atomically swaps a document's chunks: old rows are deleted and
+// new rows inserted in one transaction. Called by the parse worker only AFTER
+// parsing and chunking succeeded, so a failed reparse never destroys the
+// previous chunk set (issue: reparse used to delete first, losing data on
+// parse failure and on every asynq retry).
+func (s *Service) ReplaceChunks(ctx context.Context, tenantID, kbID, docID string, chunks []*Chunk) error {
+	if err := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("tenant_id = ? AND kb_id = ? AND doc_id = ?", tenantID, kbID, docID).
+			Delete(&Chunk{}).Error; err != nil {
+			return err
+		}
+		if len(chunks) == 0 {
+			return nil
+		}
+		return tx.CreateInBatches(chunks, 100).Error
+	}); err != nil {
+		return errs.Wrap(errs.CodeInternal, "replace chunks", err)
+	}
+	return nil
 }
 
 // Delete removes the document, its chunks, the MinIO objects, the Milvus
@@ -199,8 +214,8 @@ func (s *Service) DeleteChunks(ctx context.Context, tenantID, docID string) erro
 // transaction so the doc row, chunks, and count stay consistent. Milvus/MinIO
 // cleanup failures are recorded in cleanup_tasks for a background sweep to
 // retry — the DB transaction is the source of truth for "doc is gone".
-func (s *Service) Delete(ctx context.Context, tenantID, id string) error {
-	doc, err := s.repo.FindDoc(tenantID, id)
+func (s *Service) Delete(ctx context.Context, tenantID, kbID, id string) error {
+	doc, err := s.repo.FindDoc(tenantID, kbID, id)
 	if err != nil {
 		return err
 	}
@@ -270,8 +285,8 @@ func (s *Service) enqueueCleanup(tenantID, kbID, docID, kind, objectKey string, 
 
 // Reparse re-enqueues the parse task for an existing document. Useful when a
 // previous parse failed and the user has fixed the upstream issue.
-func (s *Service) Reparse(ctx context.Context, tenantID, id string) error {
-	doc, err := s.repo.FindDoc(tenantID, id)
+func (s *Service) Reparse(ctx context.Context, tenantID, kbID, id string) error {
+	doc, err := s.repo.FindDoc(tenantID, kbID, id)
 	if err != nil {
 		return err
 	}
@@ -351,13 +366,6 @@ func (s *Service) SetChunkVectorIDs(tenantID, docID string, vectorIDs map[string
 	return s.repo.SetDocVectorIDs(tenantID, docID, vectorIDs)
 }
 
-func (s *Service) SaveChunks(ctx context.Context, chunks []*Chunk) error {
-	if err := s.repo.CreateChunks(chunks); err != nil {
-		return errs.Wrap(errs.CodeInternal, "save chunks", err)
-	}
-	return nil
-}
-
 // WithTx clones the service with a tx-bound repo. Used when the caller needs
 // transactional consistency (e.g. parse worker writing chunks + status).
 func (s *Service) WithTx(tx *gorm.DB) *Service {
@@ -373,8 +381,8 @@ func (s *Service) WithTx(tx *gorm.DB) *Service {
 // UpdateChunkContent edits a chunk's text and re-embeds it so the new
 // content is immediately searchable. The Milvus upsert uses the same chunk
 // ID (primary key), so the old vector is overwritten in place.
-func (s *Service) UpdateChunkContent(ctx context.Context, tenantID, chunkID, content string) (*Chunk, error) {
-	chunk, err := s.repo.FindChunk(tenantID, chunkID)
+func (s *Service) UpdateChunkContent(ctx context.Context, tenantID, kbID, chunkID, content string) (*Chunk, error) {
+	chunk, err := s.repo.FindChunk(tenantID, kbID, chunkID)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +390,7 @@ func (s *Service) UpdateChunkContent(ctx context.Context, tenantID, chunkID, con
 		return nil, errs.BadRequest("content is required")
 	}
 
-	if err := s.repo.UpdateChunkContent(tenantID, chunkID, content); err != nil {
+	if err := s.repo.UpdateChunkContent(tenantID, kbID, chunkID, content); err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, "update chunk", err)
 	}
 	chunk.Content = content
@@ -415,8 +423,8 @@ func (s *Service) UpdateChunkContent(ctx context.Context, tenantID, chunkID, con
 
 // DeleteChunk removes a single chunk and its Milvus vector. The document's
 // chunk_count is decremented; the doc itself stays.
-func (s *Service) DeleteChunk(ctx context.Context, tenantID, chunkID string) error {
-	chunk, err := s.repo.FindChunk(tenantID, chunkID)
+func (s *Service) DeleteChunk(ctx context.Context, tenantID, kbID, chunkID string) error {
+	chunk, err := s.repo.FindChunk(tenantID, kbID, chunkID)
 	if err != nil {
 		return err
 	}
@@ -425,7 +433,7 @@ func (s *Service) DeleteChunk(ctx context.Context, tenantID, chunkID string) err
 			return errs.Wrap(errs.CodeInternal, "delete chunk vector", err)
 		}
 	}
-	if err := s.repo.DeleteChunk(tenantID, chunkID); err != nil {
+	if err := s.repo.DeleteChunk(tenantID, kbID, chunkID); err != nil {
 		return err
 	}
 	// Decrement doc chunk_count; non-fatal if it drifts.

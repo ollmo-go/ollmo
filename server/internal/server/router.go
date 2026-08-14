@@ -107,7 +107,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	userHandler := user.NewHandler(userRepo, tenantRepo)
 
 	kbRepo := kb.NewRepo(deps.DB)
-	embedRepo := embedding.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.JWTSecret))
+	embedRepo := embedding.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey))
 	kbSvc := kb.NewService(kbRepo, deps.Vector).
 		WithEmbeddingDefault(func(tenantID string) (string, error) {
 			p, err := embedRepo.FindDefault(tenantID)
@@ -165,9 +165,9 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	// Install routes (public, only work when system is uninitialized).
 	installSvc := install.NewService(
 		deps.DB, userRepo, tenantRepo,
-		llm.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.JWTSecret)),
-		embedding.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.JWTSecret)),
-		rerank.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.JWTSecret)),
+		llm.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey)),
+		embedding.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey)),
+		rerank.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey)),
 		deps.cfg.Auth.JWTSecret, deps.cfg.Auth.JWTExpireHours,
 	)
 	installHandler := install.NewHandler(installSvc)
@@ -412,7 +412,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	protected.Get("/documents/events", doc.SSEHandler(docEventBus))
 
 	// LLM models.
-	llmRepo := llm.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.JWTSecret))
+	llmRepo := llm.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey))
 	llmSvc := llm.NewService(llmRepo, deps.LLM)
 	llmHandler := llm.NewHandler(llmSvc)
 	llmGrp := protected.Group("/llm-models")
@@ -435,7 +435,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	embedGrp.Delete("/:id", middleware.AdminOnly(), embedHandler.Delete)
 
 	// Rerank models.
-	rerankRepo := rerank.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.JWTSecret))
+	rerankRepo := rerank.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey))
 	rerankResolver := rerank.NewResolver(rerankRepo, nil, "")
 	rerankSvc := rerank.NewService(rerankRepo)
 	rerankHandler := rerank.NewHandler(rerankSvc)

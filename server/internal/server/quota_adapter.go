@@ -53,11 +53,50 @@ func (q *quotaAdapter) CheckVectorDelta(tenantID string, delta int) error {
 	return nil
 }
 
-// CheckMessageQuota enforces the daily message limit at two levels: the
-// tenant total and the per-user cap. Returns the effective remaining (the
-// smaller of the two; -1 when both are unlimited). Either level hitting its
-// cap blocks the request.
-func (q *quotaAdapter) CheckMessageQuota(tenantID, userID string) (int, error) {
+// tryConsumeScript atomically checks both daily counters against their limits
+// and increments them only when both are within bounds. Redis executes Lua
+// scripts atomically, which closes the check-then-increment race where
+// concurrent requests could each pass the check and collectively exceed the
+// quota (TOCTOU).
+//
+// KEYS[1] tenant counter, KEYS[2] user counter
+// ARGV[1] tenant limit, ARGV[2] user limit, ARGV[3] ttl seconds
+// Returns {status, value}: status 0 = consumed (value = effective remaining),
+// -1 = tenant quota exceeded, -2 = user quota exceeded. Limits < 0 mean
+// unlimited and skip that counter entirely.
+var tryConsumeScript = redis.NewScript(`
+local tlimit = tonumber(ARGV[1])
+local ulimit = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+if tlimit >= 0 then
+  local n = tonumber(redis.call('GET', KEYS[1]) or '0')
+  if n >= tlimit then return {-1, 0} end
+end
+if ulimit >= 0 then
+  local n = tonumber(redis.call('GET', KEYS[2]) or '0')
+  if n >= ulimit then return {-2, 0} end
+end
+local trem, urem = -1, -1
+if tlimit >= 0 then
+  local n = redis.call('INCR', KEYS[1])
+  if n == 1 then redis.call('EXPIRE', KEYS[1], ttl) end
+  trem = tlimit - n
+end
+if ulimit >= 0 then
+  local n = redis.call('INCR', KEYS[2])
+  if n == 1 then redis.call('EXPIRE', KEYS[2], ttl) end
+  urem = ulimit - n
+end
+local rem = trem
+if rem < 0 or (urem >= 0 and urem < rem) then rem = urem end
+return {0, rem}
+`)
+
+// TryConsumeMessage verifies both daily caps and increments the tenant and
+// user counters in a single atomic Redis operation. Replaces the separate
+// CheckMessageQuota + IncrMessageUsage pair, whose GET/INCR gap allowed
+// concurrent requests to overshoot the quota.
+func (q *quotaAdapter) TryConsumeMessage(tenantID, userID string) (int, error) {
 	t, err := q.repo.FindByID(tenantID)
 	if err != nil {
 		return 0, errs.Wrap(errs.CodeInternal, "find tenant for msg quota", err)
@@ -67,52 +106,29 @@ func (q *quotaAdapter) CheckMessageQuota(tenantID, userID string) (int, error) {
 	}
 	ctx := context.Background()
 	date := time.Now().Format("2006-01-02")
-
-	tenantRem := -1
-	if t.MessageQuota >= 0 {
-		n, err := q.rdb.Get(ctx, fmt.Sprintf("quota:msg:tenant:%s:%s", tenantID, date)).Int()
-		if err != nil && err != redis.Nil {
-			return 0, errs.Wrap(errs.CodeInternal, "read tenant msg quota", err)
-		}
-		tenantRem = t.MessageQuota - n
-		if tenantRem <= 0 {
-			return 0, errs.Forbidden("daily tenant message quota exceeded")
-		}
+	res, err := tryConsumeScript.Run(ctx, q.rdb,
+		[]string{
+			fmt.Sprintf("quota:msg:tenant:%s:%s", tenantID, date),
+			fmt.Sprintf("quota:msg:user:%s:%s", userID, date),
+		},
+		t.MessageQuota, t.UserMessageQuota, int((25*time.Hour).Seconds()),
+	).Result()
+	if err != nil {
+		return 0, errs.Wrap(errs.CodeInternal, "consume msg quota", err)
 	}
-
-	userRem := -1
-	if t.UserMessageQuota >= 0 {
-		n, err := q.rdb.Get(ctx, fmt.Sprintf("quota:msg:user:%s:%s", userID, date)).Int()
-		if err != nil && err != redis.Nil {
-			return 0, errs.Wrap(errs.CodeInternal, "read user msg quota", err)
-		}
-		userRem = t.UserMessageQuota - n
-		if userRem <= 0 {
-			return 0, errs.Forbidden("daily user message quota exceeded")
-		}
+	parts, ok := res.([]interface{})
+	if !ok || len(parts) != 2 {
+		return 0, errs.Wrap(errs.CodeInternal, "consume msg quota", fmt.Errorf("unexpected script result %v", res))
 	}
-
-	return effectiveRemaining(tenantRem, userRem), nil
-}
-
-// IncrMessageUsage increments both the tenant and user daily counters. Called
-// after a chat message is accepted, before the LLM stream starts.
-func (q *quotaAdapter) IncrMessageUsage(tenantID, userID string) error {
-	ctx := context.Background()
-	date := time.Now().Format("2006-01-02")
-	for _, key := range []string{
-		fmt.Sprintf("quota:msg:tenant:%s:%s", tenantID, date),
-		fmt.Sprintf("quota:msg:user:%s:%s", userID, date),
-	} {
-		n, err := q.rdb.Incr(ctx, key).Result()
-		if err != nil {
-			return errs.Wrap(errs.CodeInternal, "incr msg quota", err)
-		}
-		if n == 1 {
-			q.rdb.Expire(ctx, key, 25*time.Hour)
-		}
+	status, _ := parts[0].(int64)
+	switch status {
+	case -1:
+		return 0, errs.Forbidden("daily tenant message quota exceeded")
+	case -2:
+		return 0, errs.Forbidden("daily user message quota exceeded")
 	}
-	return nil
+	value, _ := parts[1].(int64)
+	return int(value), nil
 }
 
 // MessageUsage returns (effectiveRemaining, userLimit) for display on the

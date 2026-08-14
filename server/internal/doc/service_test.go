@@ -104,7 +104,7 @@ func TestDelete_Success(t *testing.T) {
 	tenantID, kbID, docID, chunkIDs := seedDeleteFixture(t, db)
 	svc := newDocService(db)
 
-	if err := svc.Delete(context.Background(), tenantID, docID); err != nil {
+	if err := svc.Delete(context.Background(), tenantID, kbID, docID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -137,10 +137,10 @@ func TestDelete_Success(t *testing.T) {
 // NotFound error and does not modify any existing data.
 func TestDelete_NotFound(t *testing.T) {
 	db := newTestDB(t)
-	tenantID, _, docID, chunkIDs := seedDeleteFixture(t, db)
+	tenantID, kbID, docID, chunkIDs := seedDeleteFixture(t, db)
 	svc := newDocService(db)
 
-	err := svc.Delete(context.Background(), tenantID, "nonexistent-doc")
+	err := svc.Delete(context.Background(), tenantID, kbID, "nonexistent-doc")
 	if err == nil {
 		t.Fatal("expected error for non-existent doc, got nil")
 	}
@@ -200,7 +200,7 @@ func TestDelete_TransactionRollback(t *testing.T) {
 	}
 
 	// Delete doc1.
-	if err := svc.Delete(context.Background(), tenantID, docID); err != nil {
+	if err := svc.Delete(context.Background(), tenantID, kbID, docID); err != nil {
 		t.Fatalf("Delete doc1: %v", err)
 	}
 
@@ -239,10 +239,10 @@ func TestDelete_TransactionRollback(t *testing.T) {
 // panic-free with a nil minio client.
 func TestDelete_NoCleanupTasksWhenStoreNil(t *testing.T) {
 	db := newTestDB(t)
-	tenantID, _, docID, _ := seedDeleteFixture(t, db)
+	tenantID, kbID, docID, _ := seedDeleteFixture(t, db)
 	svc := newDocService(db)
 
-	if err := svc.Delete(context.Background(), tenantID, docID); err != nil {
+	if err := svc.Delete(context.Background(), tenantID, kbID, docID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -252,5 +252,90 @@ func TestDelete_NoCleanupTasksWhenStoreNil(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("expected no cleanup tasks with nil store, got %d", n)
+	}
+}
+
+// TestDelete_WrongKB verifies the cross-KB IDOR fix: addressing a document by
+// its real ID but with a mismatched kbID must fail with NotFound and leave
+// both the document and its chunks untouched.
+func TestDelete_WrongKB(t *testing.T) {
+	db := newTestDB(t)
+	tenantID, kbID, docID, chunkIDs := seedDeleteFixture(t, db)
+	svc := newDocService(db)
+
+	err := svc.Delete(context.Background(), tenantID, "other-kb", docID)
+	if err == nil {
+		t.Fatal("expected NotFound for wrong kbID, got nil")
+	}
+	e, ok := err.(*errs.Error)
+	if !ok || e.Code != errs.CodeNotFound {
+		t.Fatalf("expected *errs.Error CodeNotFound, got %v", err)
+	}
+
+	// Document and chunks must still exist.
+	if n := countRows(t, db, &Document{}, map[string]any{"id": docID, "kb_id": kbID}); n != 1 {
+		t.Errorf("doc should still exist, got %d rows", n)
+	}
+	for _, cid := range chunkIDs {
+		if n := countRows(t, db, &Chunk{}, map[string]any{"id": cid}); n != 1 {
+			t.Errorf("chunk %s should still exist, got %d rows", cid, n)
+		}
+	}
+}
+
+// TestGet_WrongKB verifies that Get with a mismatched kbID cannot read a
+// document owned by another knowledge base.
+func TestGet_WrongKB(t *testing.T) {
+	db := newTestDB(t)
+	tenantID, kbID, docID, _ := seedDeleteFixture(t, db)
+	svc := newDocService(db)
+
+	if _, err := svc.Get(context.Background(), tenantID, kbID, docID); err != nil {
+		t.Fatalf("Get with correct kbID: %v", err)
+	}
+	if _, err := svc.Get(context.Background(), tenantID, "other-kb", docID); err == nil {
+		t.Fatal("expected NotFound for wrong kbID, got nil")
+	}
+}
+
+// TestReplaceChunks verifies the atomic chunk swap used by reparse: existing
+// chunks are fully replaced by the new set in one transaction, scoped to the
+// right doc, and an empty replacement clears all chunks.
+func TestReplaceChunks(t *testing.T) {
+	db := newTestDB(t)
+	tenantID, kbID, docID, oldChunkIDs := seedDeleteFixture(t, db)
+	svc := newDocService(db)
+
+	newChunks := []*Chunk{
+		{ID: "chunk-new-1", TenantID: tenantID, KbID: kbID, DocID: docID, Index: 0, Content: "new one"},
+		{ID: "chunk-new-2", TenantID: tenantID, KbID: kbID, DocID: docID, Index: 1, Content: "new two"},
+	}
+	if err := svc.ReplaceChunks(context.Background(), tenantID, kbID, docID, newChunks); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+
+	for _, cid := range oldChunkIDs {
+		if n := countRows(t, db, &Chunk{}, map[string]any{"id": cid}); n != 0 {
+			t.Errorf("old chunk %s should be gone, got %d rows", cid, n)
+		}
+	}
+	if n := countRows(t, db, &Chunk{}, map[string]any{"doc_id": docID}); n != 2 {
+		t.Errorf("expected 2 new chunks, got %d", n)
+	}
+
+	// Wrong kbID must not touch the target doc's chunks.
+	if err := svc.ReplaceChunks(context.Background(), tenantID, "other-kb", docID, nil); err != nil {
+		t.Fatalf("ReplaceChunks wrong kb: %v", err)
+	}
+	if n := countRows(t, db, &Chunk{}, map[string]any{"doc_id": docID}); n != 2 {
+		t.Errorf("wrong-kb replace must not touch chunks, got %d rows", n)
+	}
+
+	// Empty replacement clears all chunks for the doc.
+	if err := svc.ReplaceChunks(context.Background(), tenantID, kbID, docID, nil); err != nil {
+		t.Fatalf("ReplaceChunks empty: %v", err)
+	}
+	if n := countRows(t, db, &Chunk{}, map[string]any{"doc_id": docID}); n != 0 {
+		t.Errorf("expected 0 chunks after empty replace, got %d", n)
 	}
 }

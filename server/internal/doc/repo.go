@@ -21,9 +21,12 @@ func (r *Repo) DB() *gorm.DB { return r.db }
 
 func (r *Repo) CreateDoc(d *Document) error { return r.db.Create(d).Error }
 
-func (r *Repo) FindDoc(tenantID, id string) (*Document, error) {
+// FindDoc locates a document scoped to tenant AND knowledge base. The kbID
+// condition is a security boundary: it prevents cross-KB IDOR where a member
+// with access to KB A references a document ID owned by private KB B.
+func (r *Repo) FindDoc(tenantID, kbID, id string) (*Document, error) {
 	var d Document
-	err := r.db.Where("tenant_id = ? AND id = ?", tenantID, id).First(&d).Error
+	err := r.db.Where("tenant_id = ? AND kb_id = ? AND id = ?", tenantID, kbID, id).First(&d).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.NotFound("document not found")
@@ -63,9 +66,9 @@ func (r *Repo) UpdateDocStatus(tenantID, id, status, parseErr string) error {
 		Updates(map[string]any{"status": status, "parse_error": parseErr}).Error
 }
 
-func (r *Repo) SetDocEnabled(tenantID, id string, enabled bool) error {
+func (r *Repo) SetDocEnabled(tenantID, kbID, id string, enabled bool) error {
 	res := r.db.Model(&Document{}).
-		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Where("tenant_id = ? AND kb_id = ? AND id = ?", tenantID, kbID, id).
 		Update("enabled", enabled)
 	if res.Error != nil {
 		return res.Error
@@ -149,16 +152,9 @@ func (r *Repo) DeleteDoc(tenantID, id string) error {
 	return nil
 }
 
-func (r *Repo) CreateChunks(chunks []*Chunk) error {
-	if len(chunks) == 0 {
-		return nil
-	}
-	return r.db.CreateInBatches(chunks, 100).Error
-}
-
-func (r *Repo) ListChunksByDoc(tenantID, docID string, limit, offset int) ([]*Chunk, error) {
+func (r *Repo) ListChunksByDoc(tenantID, kbID, docID string, limit, offset int) ([]*Chunk, error) {
 	var items []*Chunk
-	q := r.db.Where("tenant_id = ? AND doc_id = ?", tenantID, docID).
+	q := r.db.Where("tenant_id = ? AND kb_id = ? AND doc_id = ?", tenantID, kbID, docID).
 		Order("idx ASC")
 	if limit > 0 {
 		q = q.Limit(limit)
@@ -178,9 +174,11 @@ func (r *Repo) ListChunksByKB(tenantID, kbID string) ([]*Chunk, error) {
 	return items, err
 }
 
-func (r *Repo) FindChunk(tenantID, chunkID string) (*Chunk, error) {
+// FindChunk is scoped to tenant AND knowledge base, mirroring FindDoc's
+// cross-KB IDOR protection.
+func (r *Repo) FindChunk(tenantID, kbID, chunkID string) (*Chunk, error) {
 	var c Chunk
-	err := r.db.Where("tenant_id = ? AND id = ?", tenantID, chunkID).First(&c).Error
+	err := r.db.Where("tenant_id = ? AND kb_id = ? AND id = ?", tenantID, kbID, chunkID).First(&c).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.NotFound("chunk not found")
@@ -215,14 +213,14 @@ func (r *Repo) FindChunkPageNumbers(tenantID string, chunkIDs []string) (map[str
 	return out, nil
 }
 
-func (r *Repo) UpdateChunkContent(tenantID, chunkID, content string) error {
+func (r *Repo) UpdateChunkContent(tenantID, kbID, chunkID, content string) error {
 	return r.db.Model(&Chunk{}).
-		Where("tenant_id = ? AND id = ?", tenantID, chunkID).
+		Where("tenant_id = ? AND kb_id = ? AND id = ?", tenantID, kbID, chunkID).
 		Update("content", content).Error
 }
 
-func (r *Repo) DeleteChunk(tenantID, chunkID string) error {
-	res := r.db.Where("tenant_id = ? AND id = ?", tenantID, chunkID).Delete(&Chunk{})
+func (r *Repo) DeleteChunk(tenantID, kbID, chunkID string) error {
+	res := r.db.Where("tenant_id = ? AND kb_id = ? AND id = ?", tenantID, kbID, chunkID).Delete(&Chunk{})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -230,10 +228,6 @@ func (r *Repo) DeleteChunk(tenantID, chunkID string) error {
 		return errs.NotFound("chunk not found")
 	}
 	return nil
-}
-
-func (r *Repo) DeleteChunksByDoc(tenantID, docID string) error {
-	return r.db.Where("tenant_id = ? AND doc_id = ?", tenantID, docID).Delete(&Chunk{}).Error
 }
 
 // SparseSearch runs a MySQL FULLTEXT search (BM25-like) over chunk content

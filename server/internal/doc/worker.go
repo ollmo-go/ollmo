@@ -121,16 +121,9 @@ func (w *Worker) HandleParse(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("mark parsing: %w", err)
 	}
 
-	// If this is a reparse, drop any previously-saved chunks and their Milvus
-	// vectors so we do not leave orphans after the new chunks get new IDs.
-	if w.store != nil {
-		if err := w.store.DeleteByDoc(ctx, p.KbID, p.DocID); err != nil {
-			logf("warn: milvus delete by doc failed: %v", err)
-		}
-	}
-	if err := w.svc.DeleteChunks(ctx, p.TenantID, p.DocID); err != nil {
-		logf("warn: delete chunks failed: %v", err)
-	}
+	// NOTE: do NOT delete existing chunks/vectors before parsing. A failed
+	// parse (or an asynq retry) must leave the previous chunk set intact;
+	// replacement happens atomically after the new chunks are ready.
 
 	kbCfg, err := w.kbRepo.FindByID(p.TenantID, p.KbID)
 	if err != nil {
@@ -201,9 +194,21 @@ func (w *Worker) HandleParse(ctx context.Context, t *asynq.Task) error {
 			Content:  c,
 		})
 	}
-	if err := w.svc.SaveChunks(ctx, chunkModels); err != nil {
-		w.markFailedAndLog(p.TenantID, p.DocID, "save chunks: "+err.Error())
-		return fmt.Errorf("save chunks: %w", err)
+	// Atomically swap the old chunk set for the new one. Old chunks are only
+	// deleted once the new parse + chunking succeeded, so a failure above
+	// leaves the previous data untouched.
+	if err := w.svc.ReplaceChunks(ctx, p.TenantID, p.KbID, p.DocID, chunkModels); err != nil {
+		w.markFailedAndLog(p.TenantID, p.DocID, "replace chunks: "+err.Error())
+		return fmt.Errorf("replace chunks: %w", err)
+	}
+
+	// Old Milvus vectors reference the old chunk IDs and are now orphaned.
+	// Derived data only: on failure we log and let the embed pass overwrite
+	// what it can; stale IDs are filtered out by the MySQL join at query time.
+	if w.store != nil {
+		if err := w.store.DeleteByDoc(ctx, p.KbID, p.DocID); err != nil {
+			logf("warn: milvus delete by doc failed: %v", err)
+		}
 	}
 
 	if err := w.svc.MarkParsed(p.TenantID, p.DocID, parsedKey, len(chunks)); err != nil {
@@ -272,7 +277,7 @@ func (w *Worker) HandleEmbed(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("ensure collection: %w", err)
 	}
 
-	chunks, err := w.svc.ListAllChunksByDoc(ctx, p.TenantID, p.DocID)
+	chunks, err := w.svc.ListAllChunksByDoc(ctx, p.TenantID, p.KbID, p.DocID)
 	if err != nil {
 		w.markFailedAndLog(p.TenantID, p.DocID, "list chunks: "+err.Error())
 		return fmt.Errorf("list chunks: %w", err)
@@ -382,7 +387,7 @@ func (w *Worker) HandleExtract(ctx context.Context, t *asynq.Task) error {
 	}
 	logf("using llm provider %s (%s)", provider.Name, provider.Model)
 
-	chunks, err := w.svc.ListAllChunksByDoc(ctx, p.TenantID, p.DocID)
+	chunks, err := w.svc.ListAllChunksByDoc(ctx, p.TenantID, p.KbID, p.DocID)
 	if err != nil {
 		return fmt.Errorf("list chunks: %w", err)
 	}

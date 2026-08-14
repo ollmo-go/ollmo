@@ -1,7 +1,10 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -69,6 +72,11 @@ type MinerUConfig struct {
 type AuthConfig struct {
 	JWTSecret      string `yaml:"jwt_secret"`
 	JWTExpireHours int    `yaml:"jwt_expire_hours"`
+	// EncryptionKey is the master key for credential encryption (LLM
+	// provider API keys). Independent from JWTSecret so operators can rotate
+	// the signing secret without making stored ciphertexts undecryptable.
+	// Resolved in Load: falls back to the ORIGINAL JWTSecret when unset.
+	EncryptionKey string `yaml:"encryption_key"`
 }
 
 // QuotaConfig holds per-plan resource limits. Plans are matched by name
@@ -118,16 +126,33 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	cfg.resolveSecrets()
 	return cfg, nil
 }
 
-// validate fails fast on insecure defaults when running in production.
+// weakSecrets are publicly known values shipped in defaults and .env.example.
+// They must never sign tokens or encrypt credentials in production, and in
+// other environments they are replaced at startup (see resolveSecrets).
+func weakSecret(s string) bool {
+	switch s {
+	case "", "change_me", "change_me_to_a_long_random_string_in_production":
+		return true
+	}
+	return false
+}
+
+// validate fails fast on insecure defaults when running in production. The
+// default env is development, so every weak value here is also guarded at
+// runtime by resolveSecrets for non-production deployments.
 func (c *Config) validate() error {
 	if c.Server.Env != "production" {
 		return nil
 	}
-	if c.Auth.JWTSecret == "" || c.Auth.JWTSecret == "change_me" || c.Auth.JWTSecret == "change_me_to_a_long_random_string_in_production" {
+	if weakSecret(c.Auth.JWTSecret) {
 		return fmt.Errorf("JWT_SECRET must be set to a secure value in production")
+	}
+	if weakSecret(c.Auth.EncryptionKey) {
+		return fmt.Errorf("ENCRYPTION_KEY must be set to a secure value in production (independent from JWT_SECRET)")
 	}
 	if c.MySQL.Password == "ollmo_dev_pwd" {
 		return fmt.Errorf("MYSQL_PASSWORD must be changed from dev default in production")
@@ -136,6 +161,40 @@ func (c *Config) validate() error {
 		return fmt.Errorf("MINIO_SECRET_KEY must be changed from dev default in production")
 	}
 	return nil
+}
+
+// resolveSecrets decouples the JWT signing secret from the credential
+// encryption key:
+//
+//  1. When ENCRYPTION_KEY is unset it falls back to the ORIGINAL JWT secret
+//     (captured before any randomization) so existing deployments keep
+//     decrypting stored credentials and server/worker containers agree.
+//  2. Outside production, a weak (empty or publicly known) JWT secret is
+//     replaced with a random per-boot key so tokens are never signed with a
+//     publicly known constant. Sessions do not survive restarts until the
+//     operator sets JWT_SECRET.
+func (c *Config) resolveSecrets() {
+	if c.Auth.EncryptionKey == "" {
+		c.Auth.EncryptionKey = c.Auth.JWTSecret
+		log.Printf("[config] ENCRYPTION_KEY not set; using JWT-secret-derived key for credential encryption. " +
+			"Set a dedicated ENCRYPTION_KEY so JWT_SECRET rotation does not affect stored credentials")
+	}
+	if c.Server.Env != "production" && weakSecret(c.Auth.JWTSecret) {
+		log.Printf("[config] WARNING: JWT_SECRET is empty or a publicly known default; " +
+			"using a random per-boot signing secret (sessions will not survive restarts). Set JWT_SECRET for stable sessions")
+		c.Auth.JWTSecret = randomHex(32)
+	}
+}
+
+// randomHex returns n cryptographically random bytes as a hex string.
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failing is unrecoverable; a fixed value here would be a
+		// publicly known key, which is exactly what this path avoids.
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+	return hex.EncodeToString(b)
 }
 
 func defaults() *Config {
@@ -213,6 +272,9 @@ func overrideFromEnv(cfg *Config) {
 	}
 	if v := g("JWT_SECRET"); v != "" {
 		cfg.Auth.JWTSecret = v
+	}
+	if v := g("ENCRYPTION_KEY"); v != "" {
+		cfg.Auth.EncryptionKey = v
 	}
 	if v := g("JWT_EXPIRE_HOURS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

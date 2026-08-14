@@ -71,7 +71,7 @@ func (h *Handler) Upload(c *fiber.Ctx) error {
 }
 
 func (h *Handler) Get(c *fiber.Ctx) error {
-	doc, err := h.svc.Get(c.Context(), middleware.TenantID(c), c.Params("id"))
+	doc, err := h.svc.Get(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id"))
 	if err != nil {
 		return response.Fail(c, err)
 	}
@@ -81,16 +81,16 @@ func (h *Handler) Get(c *fiber.Ctx) error {
 // Content returns the parsed document content (markdown/text) for the document
 // viewer. Used by citation tracing to display the source document.
 func (h *Handler) Content(c *fiber.Ctx) error {
-	doc, content, err := h.svc.GetContent(c.Context(), middleware.TenantID(c), c.Params("id"))
+	doc, content, err := h.svc.GetContent(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id"))
 	if err != nil {
 		return response.Fail(c, err)
 	}
 	return response.OK(c, fiber.Map{
-		"name":         doc.Name,
-		"mime_type":    doc.MimeType,
-		"status":       doc.Status,
-		"chunk_count":  doc.ChunkCount,
-		"content":      content,
+		"name":        doc.Name,
+		"mime_type":   doc.MimeType,
+		"status":      doc.Status,
+		"chunk_count": doc.ChunkCount,
+		"content":     content,
 	})
 }
 
@@ -113,7 +113,7 @@ func (h *Handler) List(c *fiber.Ctx) error {
 func (h *Handler) ListChunks(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	size, _ := strconv.Atoi(c.Query("size", "200"))
-	chunks, err := h.svc.ListChunks(c.Context(), middleware.TenantID(c), c.Params("id"), page, size)
+	chunks, err := h.svc.ListChunks(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id"), page, size)
 	if err != nil {
 		return response.Fail(c, err)
 	}
@@ -121,14 +121,14 @@ func (h *Handler) ListChunks(c *fiber.Ctx) error {
 }
 
 func (h *Handler) Delete(c *fiber.Ctx) error {
-	if err := h.svc.Delete(c.Context(), middleware.TenantID(c), c.Params("id")); err != nil {
+	if err := h.svc.Delete(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id")); err != nil {
 		return response.Fail(c, err)
 	}
 	return response.NoContent(c)
 }
 
 func (h *Handler) Reparse(c *fiber.Ctx) error {
-	if err := h.svc.Reparse(c.Context(), middleware.TenantID(c), c.Params("id")); err != nil {
+	if err := h.svc.Reparse(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id")); err != nil {
 		return response.Fail(c, err)
 	}
 	return response.OK(c, fiber.Map{"status": "queued"})
@@ -141,7 +141,7 @@ func (h *Handler) SetEnabled(c *fiber.Ctx) error {
 	if err := c.BodyParser(&body); err != nil {
 		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
 	}
-	if err := h.svc.SetEnabled(c.Context(), middleware.TenantID(c), c.Params("id"), body.Enabled); err != nil {
+	if err := h.svc.SetEnabled(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id"), body.Enabled); err != nil {
 		return response.Fail(c, err)
 	}
 	return response.OK(c, fiber.Map{"enabled": body.Enabled})
@@ -157,7 +157,7 @@ func (h *Handler) UpdateChunk(c *fiber.Ctx) error {
 	if err := c.BodyParser(&body); err != nil {
 		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
 	}
-	chunk, err := h.svc.UpdateChunkContent(c.Context(), middleware.TenantID(c), c.Params("chunkId"), body.Content)
+	chunk, err := h.svc.UpdateChunkContent(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("chunkId"), body.Content)
 	if err != nil {
 		return response.Fail(c, err)
 	}
@@ -166,7 +166,7 @@ func (h *Handler) UpdateChunk(c *fiber.Ctx) error {
 
 // DeleteChunk removes a single chunk and its Milvus vector.
 func (h *Handler) DeleteChunk(c *fiber.Ctx) error {
-	if err := h.svc.DeleteChunk(c.Context(), middleware.TenantID(c), c.Params("chunkId")); err != nil {
+	if err := h.svc.DeleteChunk(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("chunkId")); err != nil {
 		return response.Fail(c, err)
 	}
 	return response.NoContent(c)

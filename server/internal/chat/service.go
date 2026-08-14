@@ -41,12 +41,11 @@ type AutoMemoryTrigger func(tenantID, convID string)
 type ConversationDeletedHook func(tenantID, convID string)
 
 // MessageQuotaChecker enforces daily message limits at two levels: tenant
-// total and per-user cap. Check returns the effective remaining (-1 for
-// unlimited); Incr bumps both counters after a message is accepted;
+// total and per-user cap. TryConsumeMessage checks both caps and increments
+// the counters in one atomic operation (no check-then-incr race);
 // Usage returns (effectiveRemaining, userLimit) for display.
 type MessageQuotaChecker interface {
-	CheckMessageQuota(tenantID, userID string) (remaining int, err error)
-	IncrMessageUsage(tenantID, userID string) error
+	TryConsumeMessage(tenantID, userID string) (remaining int, err error)
 	MessageUsage(tenantID, userID string) (remaining, userLimit int, err error)
 }
 
@@ -329,9 +328,11 @@ func (s *Service) Stream(ctx context.Context, tenantID, userID, convID string, i
 		return nil, errs.BadRequest("message is required")
 	}
 
-	// Enforce daily message quota before touching the LLM.
+	// Atomically consume one unit from the daily quota before touching the
+	// LLM: both caps are checked and both counters incremented in a single
+	// Redis operation, so concurrent requests cannot overshoot the limit.
 	if s.msgQuota != nil {
-		if _, err := s.msgQuota.CheckMessageQuota(tenantID, userID); err != nil {
+		if _, err := s.msgQuota.TryConsumeMessage(tenantID, userID); err != nil {
 			return nil, err
 		}
 	}
@@ -361,13 +362,6 @@ func (s *Service) Stream(ctx context.Context, tenantID, userID, convID string, i
 		log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, convID, err)
 	}
 
-	// Bump the daily message counter after the message is accepted.
-	if s.msgQuota != nil {
-		if err := s.msgQuota.IncrMessageUsage(tenantID, userID); err != nil {
-			log.Printf("[chat] incr msg quota failed tenant=%s: %v", tenantID, err)
-		}
-	}
-
 	out := make(chan StreamReply, 16)
 	go s.runStream(ctx, tenantID, conv, in, provider, userMsg, out, cfg)
 	return out, nil
@@ -378,7 +372,7 @@ func (s *Service) Stream(ctx context.Context, tenantID, userID, convID string, i
 // try different prompts/settings without creating throwaway conversations.
 func (s *Service) TestStream(ctx context.Context, tenantID, userID, kbID, query string) (<-chan StreamReply, error) {
 	if s.msgQuota != nil {
-		if _, err := s.msgQuota.CheckMessageQuota(tenantID, userID); err != nil {
+		if _, err := s.msgQuota.TryConsumeMessage(tenantID, userID); err != nil {
 			return nil, err
 		}
 	}
@@ -386,11 +380,6 @@ func (s *Service) TestStream(ctx context.Context, tenantID, userID, kbID, query 
 	provider, err := s.resolveProvider(ctx, tenantID, cfg.LLMModelID)
 	if err != nil {
 		return nil, err
-	}
-	if s.msgQuota != nil {
-		if err := s.msgQuota.IncrMessageUsage(tenantID, userID); err != nil {
-			log.Printf("[chat] incr msg quota failed tenant=%s: %v", tenantID, err)
-		}
 	}
 	out := make(chan StreamReply, 16)
 	go s.testStream(ctx, tenantID, userID, kbID, query, provider, out, cfg)

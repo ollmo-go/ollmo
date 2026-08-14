@@ -118,7 +118,7 @@ func RunWorker(cfg *config.Config) error {
 	// difference is that the worker reads from Redis instead of HTTP.
 	docRepo := doc.NewRepo(deps.DB)
 	kbRepo := kb.NewRepo(deps.DB)
-	embedRepo := embedding.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.JWTSecret))
+	embedRepo := embedding.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey))
 	embedResolver := embedding.NewResolver(embedRepo, nil)
 	// The worker's doc service publishes status events through Redis so the
 	// API process (which owns the SSE connections) can relay them.
@@ -142,7 +142,7 @@ func RunWorker(cfg *config.Config) error {
 			ChunkSize: k.ChunkSize, ChunkOverlap: k.ChunkOverlap,
 		}, nil
 	})
-	llmRepo := llm.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.JWTSecret))
+	llmRepo := llm.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey))
 	graphSvc := graph.NewService(graph.NewRepo(deps.DB), deps.LLM)
 	docWorker := doc.NewWorker(
 		docSvc, kbRepo, deps.MinIO, deps.cfg.MinIO.Bucket, deps.MinerU,
