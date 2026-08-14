@@ -6,6 +6,23 @@ import (
 	"ollmo/ollmo/pkg/vector"
 )
 
+// normalizeVectorWeight maps the request-level vector weight to the dense and
+// sparse fusion weights. Nil keeps equal weights; values outside [0,1] are
+// clamped so a hostile client cannot zero out both legs.
+func normalizeVectorWeight(w *float64) (dense, sparse float64) {
+	if w == nil {
+		return 1.0, 1.0
+	}
+	v := *w
+	if v < 0 {
+		v = 0
+	}
+	if v > 1 {
+		v = 1
+	}
+	return v, 1 - v
+}
+
 // rrfList bundles a list of Milvus hits with its weight in the fusion.
 type rrfList struct {
 	hits   []vector.SearchHit

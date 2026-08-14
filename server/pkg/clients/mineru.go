@@ -43,10 +43,24 @@ type ImageRef struct {
 	Type string `json:"type"`
 }
 
-// ParseResult is the parsed markdown content plus extracted images.
+// ContentItem is one entry of MinerU's content_list output. PageIdx is the
+// 0-based page the item was found on; Text carries the payload for text and
+// equation items, TableBody the HTML for tables, ImgPath the image reference.
+type ContentItem struct {
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	PageIdx int    `json:"page_idx"`
+	TableBody string `json:"table_body"`
+	ImgPath   string `json:"img_path"`
+}
+
+// ParseResult is the parsed markdown content plus extracted images and the
+// page-annotated content list. ContentList is optional: when the MinerU
+// deployment does not return it, chunks simply carry no page numbers.
 type ParseResult struct {
-	Markdown string     `json:"markdown"`
-	Images   []ImageRef `json:"images"`
+	Markdown    string        `json:"markdown"`
+	Images      []ImageRef    `json:"images"`
+	ContentList []ContentItem `json:"content_list,omitempty"`
 }
 
 type taskStatusResponse struct {

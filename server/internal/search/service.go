@@ -119,13 +119,15 @@ func (s *Service) Search(ctx context.Context, tenantID, kbID string, req SearchR
 	// dense-only retrieval so the search still returns results.
 	sparseHits, _ := s.docRepo.SparseSearch(ctx, tenantID, kbID, req.Query, req.TopK*2)
 
-	// 4. RRF fusion across rank lists
+	// 4. RRF fusion across rank lists. VectorWeight (0..1) biases the fusion
+	// towards the dense leg; nil keeps the equal-weight default.
+	denseWeight, sparseWeight := normalizeVectorWeight(req.VectorWeight)
 	var lists []rrfList
 	if len(denseHits) > 0 {
-		lists = append(lists, rrfList{hits: denseHits, weight: 1.0})
+		lists = append(lists, rrfList{hits: denseHits, weight: denseWeight})
 	}
 	if len(sparseHits) > 0 {
-		lists = append(lists, rrfList{hits: sparseHits, weight: 1.0})
+		lists = append(lists, rrfList{hits: sparseHits, weight: sparseWeight})
 	}
 	fused := rrf(lists)
 	// Capture the full RRF ranking (before candidate trimming) for debug

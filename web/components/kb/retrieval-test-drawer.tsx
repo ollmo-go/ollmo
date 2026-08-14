@@ -21,6 +21,7 @@ export function RetrievalTestDrawer({ kbId, onClose }: { kbId: string; onClose: 
   const [topK, setTopK] = useState(10);
   const [rerank, setRerank] = useState(false);
   const [rerankModelId, setRerankModelId] = useState("");
+  const [vectorWeight, setVectorWeight] = useState(0.5);
   const [debugMode, setDebugMode] = useState(true);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SearchResult | null>(null);
@@ -37,6 +38,7 @@ export function RetrievalTestDrawer({ kbId, onClose }: { kbId: string; onClose: 
         top_k: topK,
         rerank: rerank,
         rerank_model_id: rerank ? rerankModelId || undefined : undefined,
+        vector_weight: vectorWeight,
       };
       const res = debugMode
         ? await api.searchDebug(kbId, body)
@@ -127,6 +129,31 @@ export function RetrievalTestDrawer({ kbId, onClose }: { kbId: string; onClose: 
               )}
               {t("retrieval_test.debug_mode")}
             </button>
+          </div>
+
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-muted-foreground whitespace-nowrap">
+              {t("retrieval_test.vector_weight")}
+            </span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              {t("retrieval_test.keyword_weight")}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.1}
+              value={vectorWeight}
+              onChange={(e) => setVectorWeight(Number(e.target.value))}
+              className="flex-1 min-w-[140px] accent-primary"
+              aria-label={t("retrieval_test.vector_weight")}
+            />
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              {t("retrieval_test.semantic_weight")}
+            </span>
+            <span className="font-mono text-xs text-primary w-8 text-right">
+              {vectorWeight.toFixed(1)}
+            </span>
           </div>
         </div>
 

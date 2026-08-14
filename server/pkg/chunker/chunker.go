@@ -3,7 +3,10 @@
 // them as needed.
 package chunker
 
-import "strings"
+import (
+	"encoding/csv"
+	"strings"
+)
 
 // Chunking strategy names. The KB's chunk_strategy field selects which
 // splitter the parse worker uses. Unknown strategies fall back to paragraph.
@@ -12,6 +15,7 @@ const (
 	StrategyToken       = "token"
 	StrategyParentChild = "parent_child"
 	StrategyHeaderAware = "header"
+	StrategyQA          = "qa"
 )
 
 // SplitMarkdown dispatches to the chunking strategy pinned on the KB. All
@@ -183,6 +187,54 @@ func chunkByHeader(md string, chunkSize, chunkOverlap int) []string {
 type section struct {
 	header string
 	body   string
+}
+
+// SplitQA turns a two-column CSV (question, answer) into one chunk per row,
+// formatted as "question: …\nanswer: …" so both sides feed the embedding and
+// the LLM context. The first row is dropped when it looks like a header
+// (question/answer in either language); rows without a usable question or
+// answer are skipped. Returns nil when the input yields no Q&A pairs — the
+// caller should then fall back to a regular text strategy.
+func SplitQA(csvText string) []string {
+	reader := csv.NewReader(strings.NewReader(csvText))
+	reader.FieldsPerRecord = -1 // rows may carry extra columns; we read the first two
+	reader.TrimLeadingSpace = true
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return nil
+	}
+
+	var chunks []string
+	for i, row := range rows {
+		if len(row) < 2 {
+			continue
+		}
+		q := strings.TrimSpace(row[0])
+		a := strings.TrimSpace(row[1])
+		if q == "" || a == "" {
+			continue
+		}
+		if i == 0 && isQAHeader(q, a) {
+			continue
+		}
+		chunks = append(chunks, "question: "+q+"\nanswer: "+a)
+	}
+	return chunks
+}
+
+// isQAHeader reports whether the first CSV row is a header rather than data.
+func isQAHeader(q, a string) bool {
+	q, a = strings.ToLower(q), strings.ToLower(a)
+	qa := func(s string) bool {
+		switch s {
+		case "question", "q", "问题", "提问":
+			return true
+		case "answer", "a", "答案", "回答":
+			return true
+		}
+		return false
+	}
+	return qa(q) && qa(a)
 }
 
 // splitSections splits markdown into sections on markdown headers (# .. ######).

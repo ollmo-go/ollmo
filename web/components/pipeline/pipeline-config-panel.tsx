@@ -59,10 +59,16 @@ function renderEditor(
           <Field label="Strategy">
             <SelectInput
               value={String(node.data.strategy || "paragraph")}
-              options={["paragraph", "token", "parent_child", "header"]}
+              options={["paragraph", "token", "parent_child", "header", "qa"]}
               onChange={(v) => patch({ strategy: v })}
             />
           </Field>
+          {String(node.data.strategy || "paragraph") === "qa" && (
+            <p className="text-xs text-muted-foreground">
+              Q&amp;A template: two-column CSV (question, answer), one chunk per row.
+              Non-CSV files fall back to paragraph chunking.
+            </p>
+          )}
           <Field label="Chunk size">
             <NumberInput value={Number(node.data.size || 500)} onChange={(v) => patch({ size: v })} />
           </Field>

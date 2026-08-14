@@ -765,6 +765,7 @@ export const api = {
     top_k?: number;
     rerank?: boolean;
     rerank_model_id?: string;
+    vector_weight?: number;
   }): Promise<SearchResult> {
     return request(`/knowledge-bases/${kbId}/search`, {
       method: "POST",
@@ -777,6 +778,7 @@ export const api = {
     top_k?: number;
     rerank?: boolean;
     rerank_model_id?: string;
+    vector_weight?: number;
   }): Promise<SearchResult> {
     return request(`/knowledge-bases/${kbId}/search/debug`, {
       method: "POST",

@@ -202,6 +202,29 @@ func TestRRF_WeightScaling(t *testing.T) {
 	}
 }
 
+func TestNormalizeVectorWeight(t *testing.T) {
+	cases := []struct {
+		name          string
+		in            *float64
+		dense, sparse float64
+	}{
+		{"nil keeps equal weights", nil, 1.0, 1.0},
+		{"0.7 biases dense", ptr(0.7), 0.7, 0.3},
+		{"0 is sparse-only", ptr(0.0), 0.0, 1.0},
+		{"1 is dense-only", ptr(1.0), 1.0, 0.0},
+		{"negative clamped", ptr(-3), 0.0, 1.0},
+		{"overflow clamped", ptr(7), 1.0, 0.0},
+	}
+	for _, tc := range cases {
+		d, s := normalizeVectorWeight(tc.in)
+		if math.Abs(d-tc.dense) > 1e-9 || math.Abs(s-tc.sparse) > 1e-9 {
+			t.Errorf("%s: got (%v,%v), want (%v,%v)", tc.name, d, s, tc.dense, tc.sparse)
+		}
+	}
+}
+
+func ptr(f float64) *float64 { return &f }
+
 // TestRRF_Dedup verifies that the same chunk ID appearing twice in one list
 // does not double-count (only the first occurrence contributes). The rrf
 // implementation uses a payload map keyed by ID, so the second occurrence is

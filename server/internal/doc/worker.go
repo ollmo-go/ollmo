@@ -140,6 +140,7 @@ func (w *Worker) HandleParse(ctx context.Context, t *asynq.Task) error {
 	// Parse the document: text files are read directly from MinIO, while
 	// binary formats (PDF, DOCX, …) go through MinerU for deep parsing.
 	var markdown string
+	var pageBlocks []pageBlock
 	if isTextFile(p.ObjectKey) {
 		logf("text file, reading directly from minio")
 		obj, err := w.minio.GetObject(ctx, w.bucket, p.ObjectKey, minio.GetObjectOptions{})
@@ -157,16 +158,22 @@ func (w *Worker) HandleParse(ctx context.Context, t *asynq.Task) error {
 	} else {
 		// Try MinerU first for high-quality parsing (OCR, layout, tables).
 		// Fall back to local parser when MinerU is unavailable.
-		md, err := w.parseWithMinerU(ctx, p, pc, logf)
+		result, err := w.parseWithMinerU(ctx, p, pc, logf)
 		if err != nil {
 			logf("mineru unavailable (%v), falling back to local parser", err)
-			md, err = w.parseLocal(ctx, p, logf)
+			md, err := w.parseLocal(ctx, p, logf)
 			if err != nil {
 				w.markFailedAndLog(p.TenantID, p.DocID, "parse: "+err.Error())
 				return fmt.Errorf("parse: %w", err)
 			}
+			markdown = md
+		} else {
+			markdown = result.Markdown
+			if len(result.ContentList) > 0 {
+				pageBlocks = anchorPages(markdown, result.ContentList)
+				logf("anchored %d/%d content items to pages", len(pageBlocks), len(result.ContentList))
+			}
 		}
-		markdown = md
 	}
 	logf("parsed, markdown=%d bytes", len(markdown))
 
@@ -180,20 +187,31 @@ func (w *Worker) HandleParse(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("save parsed: %w", err)
 	}
 
-	// Chunk and persist using the pipeline chunker config.
-	chunks := chunker.SplitMarkdown(markdown, pc.Chunker.Strategy, pc.Chunker.Size, pc.Chunker.Overlap)
+	// Chunk and persist using the pipeline chunker config. The QA strategy
+	// only applies to CSV uploads (one question/answer pair per row); it
+	// falls back to the regular text strategy for any other format.
+	var chunks []string
+	if strings.EqualFold(pc.Chunker.Strategy, chunker.StrategyQA) && strings.HasSuffix(strings.ToLower(p.ObjectKey), ".csv") {
+		chunks = chunker.SplitQA(markdown)
+		logf("qa chunking produced %d chunks", len(chunks))
+	}
+	if len(chunks) == 0 {
+		chunks = chunker.SplitMarkdown(markdown, pc.Chunker.Strategy, pc.Chunker.Size, pc.Chunker.Overlap)
+	}
 	logf("chunked into %d pieces (strategy=%s)", len(chunks), pc.Chunker.Strategy)
+	pages := chunkPageNumbers(markdown, pageBlocks, chunks)
 
 	chunkModels := make([]*Chunk, 0, len(chunks))
 	for i, c := range chunks {
 		chunkModels = append(chunkModels, &Chunk{
-			ID:         uuid.NewString(),
-			TenantID:   p.TenantID,
-			KbID:       p.KbID,
-			DocID:      p.DocID,
-			Index:      i,
-			Content:    c,
-			TokenCount: tokener.Estimate(c),
+			ID:          uuid.NewString(),
+			TenantID:    p.TenantID,
+			KbID:        p.KbID,
+			DocID:       p.DocID,
+			Index:       i,
+			Content:     c,
+			TokenCount:  tokener.Estimate(c),
+			PageNumbers: pages[i],
 		})
 	}
 	// Atomically swap the old chunk set for the new one. Old chunks are only
@@ -455,13 +473,13 @@ func (w *Worker) loadPipelineConfig(ctx context.Context, tenantID, kbID string, 
 // parseWithMinerU submits the document to MinerU for high-quality parsing
 // (OCR, layout recognition, table extraction). Returns an error if MinerU is
 // unavailable so the caller can fall back to local parsing.
-func (w *Worker) parseWithMinerU(ctx context.Context, p ParseDocumentPayload, pc pipeline.IngestionConfig, logf func(string, ...any)) (string, error) {
+func (w *Worker) parseWithMinerU(ctx context.Context, p ParseDocumentPayload, pc pipeline.IngestionConfig, logf func(string, ...any)) (*clients.ParseResult, error) {
 	if w.mineru == nil {
-		return "", fmt.Errorf("mineru client not configured")
+		return nil, fmt.Errorf("mineru client not configured")
 	}
 	presignedURL, err := w.minio.PresignedGetObject(ctx, w.bucket, p.ObjectKey, time.Hour, nil)
 	if err != nil {
-		return "", fmt.Errorf("presign: %w", err)
+		return nil, fmt.Errorf("presign: %w", err)
 	}
 	taskID, err := w.mineru.SubmitParse(ctx, clients.ParseRequest{
 		FileURL:       presignedURL.String(),
@@ -470,14 +488,14 @@ func (w *Worker) parseWithMinerU(ctx context.Context, p ParseDocumentPayload, pc
 		EnableOCR:     pc.Parser.OCR,
 	})
 	if err != nil {
-		return "", fmt.Errorf("submit: %w", err)
+		return nil, fmt.Errorf("submit: %w", err)
 	}
 	logf("mineru task_id=%s, waiting", taskID)
 	result, err := w.mineru.Wait(ctx, taskID, 5*time.Second)
 	if err != nil {
-		return "", fmt.Errorf("wait: %w", err)
+		return nil, fmt.Errorf("wait: %w", err)
 	}
-	return result.Markdown, nil
+	return result, nil
 }
 
 // parseLocal reads the file from MinIO and extracts text using built-in

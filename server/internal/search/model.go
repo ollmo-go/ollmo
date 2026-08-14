@@ -3,16 +3,19 @@ package search
 // SearchRequest is the input for a retrieval query. The query is embedded
 // via the model pinned on the KB for dense Milvus search, and also run
 // through MySQL FULLTEXT for the lexical leg; the two rank lists are
-// fused via RRF. Rerank toggles the optional cross-encoder rerank leg;
+// fused via RRF. VectorWeight (0..1) biases the fusion towards the dense
+// leg; the sparse leg receives 1-VectorWeight. Nil keeps equal weights.
+// Rerank toggles the optional cross-encoder rerank leg;
 // when false or the reranker is not configured, results are returned in
 // dense+sparse RRF order. Debug enables intermediate retrieval details
 // (raw dense/sparse hits and RRF scores) on the response for observability.
 type SearchRequest struct {
-	Query         string `json:"query"`
-	TopK          int    `json:"top_k"`
-	Rerank        *bool  `json:"rerank,omitempty"`
-	RerankModelID string `json:"rerank_model_id,omitempty"`
-	Debug         bool   `json:"debug,omitempty"`
+	Query         string   `json:"query"`
+	TopK          int      `json:"top_k"`
+	Rerank        *bool    `json:"rerank,omitempty"`
+	RerankModelID string   `json:"rerank_model_id,omitempty"`
+	VectorWeight  *float64 `json:"vector_weight,omitempty"`
+	Debug         bool     `json:"debug,omitempty"`
 }
 
 // SearchHit is one retrieved chunk plus the doc it came from. The chat domain
