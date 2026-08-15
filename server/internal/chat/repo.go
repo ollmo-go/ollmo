@@ -115,6 +115,22 @@ func (r *Repo) DeleteConv(tenantID, ownerID, id string) error {
 
 func (r *Repo) CreateMsg(m *Message) error { return r.db.Create(m).Error }
 
+// SetMsgVote stores the user's feedback (""|"up"|"down") on one assistant
+// message. Scoped to tenant + conversation; RowsAffected==0 means the message
+// does not exist in that conversation (or is not an assistant message).
+func (r *Repo) SetMsgVote(tenantID, convID, msgID, vote string) error {
+	res := r.db.Model(&Message{}).
+		Where("tenant_id = ? AND conversation_id = ? AND id = ? AND role = ?", tenantID, convID, msgID, RoleAssistant).
+		Update("vote", vote)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errs.NotFound("message not found")
+	}
+	return nil
+}
+
 func (r *Repo) ListMsgs(tenantID, convID string) ([]*Message, error) {
 	var items []*Message
 	err := r.db.Where("tenant_id = ? AND conversation_id = ?", tenantID, convID).

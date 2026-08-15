@@ -47,3 +47,13 @@ func (h *Handler) RecentActivity(c *fiber.Ctx) error {
 	}
 	return response.OK(c, fiber.Map{"items": items})
 }
+
+// Feedback lists voted assistant messages (up/down) for bad-case review.
+func (h *Handler) Feedback(c *fiber.Ctx) error {
+	limit, _ := strconv.Atoi(c.Query("limit", "50"))
+	items, err := h.svc.Feedback(c.Context(), middleware.TenantID(c), limit)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	return response.OK(c, fiber.Map{"items": items})
+}

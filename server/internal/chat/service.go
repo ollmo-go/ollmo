@@ -279,6 +279,20 @@ func (s *Service) ListMessages(ctx context.Context, tenantID, userID, convID str
 	return s.repo.ListMsgs(tenantID, convID)
 }
 
+// VoteMessage records the user's feedback ("", "up", "down") on an assistant
+// message. Clicking the active button again clears the vote ("").
+func (s *Service) VoteMessage(ctx context.Context, tenantID, userID, convID, msgID, vote string) error {
+	switch vote {
+	case "", "up", "down":
+	default:
+		return errs.BadRequest("vote must be one of \"\", \"up\", \"down\"")
+	}
+	if _, err := s.repo.FindConvOwned(tenantID, userID, convID); err != nil {
+		return err
+	}
+	return s.repo.SetMsgVote(tenantID, convID, msgID, vote)
+}
+
 func (s *Service) Delete(ctx context.Context, tenantID, userID, id string) error {
 	if err := s.repo.DeleteConv(tenantID, userID, id); err != nil {
 		return err

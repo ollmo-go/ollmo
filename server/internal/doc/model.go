@@ -17,26 +17,29 @@ const (
 // Document is a tenant-scoped file uploaded to a knowledge base. ObjectKey
 // points at the original in MinIO; ParsedObjectKey holds the parsed markdown.
 type Document struct {
-	ID              string    `gorm:"primaryKey;size:36" json:"id"`
-	TenantID        string    `gorm:"size:36;not null;index:idx_doc_tenant_kb,priority:1;index:idx_doc_tenant_kb_status,priority:1" json:"tenant_id"`
-	KbID            string    `gorm:"size:36;not null;index:idx_doc_tenant_kb,priority:2;index:idx_doc_tenant_kb_status,priority:2" json:"kb_id"`
-	Name            string    `gorm:"size:255;not null" json:"name"`
-	Size            int64     `gorm:"not null;default:0" json:"size"`
-	MimeType        string    `gorm:"size:128" json:"mime_type"`
-	ObjectKey       string    `gorm:"size:512;not null" json:"object_key"`
-	ParsedObjectKey string    `gorm:"size:512" json:"parsed_object_key"`
-	SourceURL       string    `gorm:"size:1024" json:"source_url,omitempty"`
+	ID              string `gorm:"primaryKey;size:36" json:"id"`
+	TenantID        string `gorm:"size:36;not null;index:idx_doc_tenant_kb,priority:1;index:idx_doc_tenant_kb_status,priority:1" json:"tenant_id"`
+	KbID            string `gorm:"size:36;not null;index:idx_doc_tenant_kb,priority:2;index:idx_doc_tenant_kb_status,priority:2" json:"kb_id"`
+	Name            string `gorm:"size:255;not null" json:"name"`
+	Size            int64  `gorm:"not null;default:0" json:"size"`
+	MimeType        string `gorm:"size:128" json:"mime_type"`
+	ObjectKey       string `gorm:"size:512;not null" json:"object_key"`
+	ParsedObjectKey string `gorm:"size:512" json:"parsed_object_key"`
+	SourceURL       string `gorm:"size:1024" json:"source_url,omitempty"`
 	// Metadata holds a JSON object of user-defined key/value pairs used as
 	// retrieval filters (e.g. {"source":"hr"}). Stored as text for portability;
 	// MySQL JSON functions still operate on the valid JSON string.
-	Metadata    string    `gorm:"type:text" json:"metadata,omitempty"`
-	Status      string    `gorm:"size:32;not null;default:queued;index:idx_doc_tenant_kb_status,priority:3" json:"status"`
-	ParseError  string    `gorm:"size:512" json:"parse_error,omitempty"`
-	Enabled     bool      `gorm:"not null;default:true" json:"enabled"`
-	ChunkCount  int       `gorm:"not null;default:0" json:"chunk_count"`
-	OwnerID     string    `gorm:"size:36;index;not null" json:"owner_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Metadata   string    `gorm:"type:text" json:"metadata,omitempty"`
+	Status     string    `gorm:"size:32;not null;default:queued;index:idx_doc_tenant_kb_status,priority:3" json:"status"`
+	ParseError string    `gorm:"size:512" json:"parse_error,omitempty"`
+	Enabled    bool      `gorm:"not null;default:true" json:"enabled"`
+	ChunkCount int       `gorm:"not null;default:0" json:"chunk_count"`
+	OwnerID    string    `gorm:"size:36;index;not null" json:"owner_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	// HitCount aggregates the chunk hit_num sums for this document. It is
+	// computed at read time (not persisted) for the document list view.
+	HitCount int64 `gorm:"-" json:"hit_count,omitempty"`
 }
 
 // Chunk roles for the parent_child strategy. Children ("") are embedded and
@@ -47,18 +50,22 @@ const ChunkRoleParent = "parent"
 // Chunk is a segment of a parsed document. VectorID is the Milvus primary key;
 // it mirrors Chunk.ID, so a non-empty value also signals successful indexing.
 type Chunk struct {
-	ID          string    `gorm:"primaryKey;size:36" json:"id"`
-	TenantID    string    `gorm:"size:36;not null;index:idx_chunk_tenant_kb,priority:1;index:idx_chunk_tenant_doc,priority:1" json:"tenant_id"`
-	KbID        string    `gorm:"size:36;not null;index:idx_chunk_tenant_kb,priority:2" json:"kb_id"`
-	DocID       string    `gorm:"size:36;not null;index:idx_chunk_tenant_doc,priority:2" json:"doc_id"`
-	ParentID    string    `gorm:"size:36;index:idx_chunk_parent" json:"parent_id,omitempty"`
-	Role        string    `gorm:"size:16;not null;default:''" json:"role,omitempty"`
-	Index       int       `gorm:"column:idx;not null" json:"index"`
-	Content     string    `gorm:"type:text" json:"content"`
-	TokenCount  int       `gorm:"not null;default:0" json:"token_count"`
-	PageNumbers string    `gorm:"size:64" json:"page_numbers"`
-	VectorID    string    `gorm:"size:36" json:"vector_id"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string `gorm:"primaryKey;size:36" json:"id"`
+	TenantID    string `gorm:"size:36;not null;index:idx_chunk_tenant_kb,priority:1;index:idx_chunk_tenant_doc,priority:1" json:"tenant_id"`
+	KbID        string `gorm:"size:36;not null;index:idx_chunk_tenant_kb,priority:2" json:"kb_id"`
+	DocID       string `gorm:"size:36;not null;index:idx_chunk_tenant_doc,priority:2" json:"doc_id"`
+	ParentID    string `gorm:"size:36;index:idx_chunk_parent" json:"parent_id,omitempty"`
+	Role        string `gorm:"size:16;not null;default:''" json:"role,omitempty"`
+	Index       int    `gorm:"column:idx;not null" json:"index"`
+	Content     string `gorm:"type:text" json:"content"`
+	TokenCount  int    `gorm:"not null;default:0" json:"token_count"`
+	PageNumbers string `gorm:"size:64" json:"page_numbers"`
+	VectorID    string `gorm:"size:36" json:"vector_id"`
+	// HitNum counts how many times this chunk was cited by real chat
+	// retrievals (test-drawer searches are not tracked). Used to spot hot
+	// content and never-hit chunks for KB health analysis.
+	HitNum    int64     `gorm:"not null;default:0" json:"hit_num,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // CleanupTask records a pending Milvus/MinIO cleanup that failed during doc

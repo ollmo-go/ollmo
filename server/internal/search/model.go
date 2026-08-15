@@ -19,6 +19,10 @@ type SearchRequest struct {
 	// Filters narrows retrieval to documents whose metadata matches every
 	// key/value pair (AND semantics). Keys must match [A-Za-z0-9_-].
 	Filters map[string]string `json:"filters,omitempty"`
+	// TrackHits bumps chunks.hit_num for the returned hits. Set by real chat
+	// retrievals only; test-drawer searches leave it false so experiments
+	// do not pollute hit statistics.
+	TrackHits bool `json:"-"`
 }
 
 // SearchHit is one retrieved chunk plus the doc it came from. The chat domain

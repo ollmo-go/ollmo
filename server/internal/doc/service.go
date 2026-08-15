@@ -421,7 +421,22 @@ func (s *Service) List(ctx context.Context, tenantID, kbID string, page, size in
 	if size <= 0 || size > 100 {
 		size = 20
 	}
-	return s.repo.ListDocs(tenantID, kbID, page, size)
+	items, total, err := s.repo.ListDocs(tenantID, kbID, page, size)
+	if err != nil {
+		return nil, 0, err
+	}
+	// Enrich with per-document retrieval hit counts (non-fatal: the column
+	// simply stays hidden when stats fail).
+	ids := make([]string, len(items))
+	for i, d := range items {
+		ids[i] = d.ID
+	}
+	if hits, err := s.repo.DocHitStats(tenantID, ids); err == nil {
+		for _, d := range items {
+			d.HitCount = hits[d.ID]
+		}
+	}
+	return items, total, nil
 }
 
 func (s *Service) SetEnabled(ctx context.Context, tenantID, kbID, id string, enabled bool) error {

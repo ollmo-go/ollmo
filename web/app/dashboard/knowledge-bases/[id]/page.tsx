@@ -847,6 +847,7 @@ export default function KBDetailPage() {
                     <th className="py-2 pr-4">{t("doc.status")}</th>
                     <th className="py-2 pr-4">{t("doc.enabled")}</th>
                     <th className="py-2 pr-4">{t("doc.chunks")}</th>
+                    <th className="py-2 pr-4">{t("doc.hits")}</th>
                     <th className="py-2 pr-4">{t("doc.size")}</th>
                     <th className="py-2 pr-4">{t("doc.actions")}</th>
                   </tr>
@@ -912,6 +913,7 @@ export default function KBDetailPage() {
                         </button>
                       </td>
                       <td className="py-2 pr-4">{d.chunk_count}</td>
+                      <td className="py-2 pr-4 tabular-nums">{d.hit_count ?? 0}</td>
                       <td className="py-2 pr-4">{formatSize(d.size)}</td>
                       <td className="py-2 pr-4">
                         <div className="flex gap-1">

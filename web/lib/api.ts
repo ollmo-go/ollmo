@@ -105,6 +105,8 @@ export interface Document {
   owner_id: string;
   source_url?: string;
   metadata?: string;
+  // Summed chunk hit_num (computed at read time, not persisted).
+  hit_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -250,6 +252,8 @@ export interface Message {
   // Client-only flag: this assistant message came from a matched annotation
   // reply, not the LLM (not persisted server-side).
   annotation?: boolean;
+  // User feedback on an assistant message: "up", "down", or unset.
+  vote?: string;
   created_at: string;
 }
 
@@ -458,6 +462,19 @@ export interface ActivityItem {
   name: string;
   status?: string;
   kb_id: string;
+  created_at: string;
+}
+
+// Voted assistant message for bad-case review.
+export interface FeedbackItem {
+  id: string;
+  conversation_id: string;
+  kb_id: string;
+  kb_name: string;
+  user_name: string;
+  question: string;
+  answer: string;
+  vote: string; // "up" | "down"
   created_at: string;
 }
 
@@ -922,6 +939,14 @@ export const api = {
   async listMessages(convId: string): Promise<{ items: Message[] }> {
     return request(`/conversations/${convId}/messages`);
   },
+  // Vote on an assistant message ("up"/"down"; sending the current value
+  // again clears the vote).
+  async voteMessage(convId: string, msgId: string, vote: "up" | "down" | ""): Promise<void> {
+    await request(`/conversations/${convId}/messages/${msgId}/vote`, {
+      method: "POST",
+      body: JSON.stringify({ vote }),
+    });
+  },
   async deleteConversation(convId: string): Promise<void> {
     await request(`/conversations/${convId}`, { method: "DELETE" });
   },
@@ -1119,6 +1144,9 @@ export const api = {
   },
   async analyticsActivity(limit = 20): Promise<{ items: ActivityItem[] }> {
     return request(`/analytics/activity?limit=${limit}`);
+  },
+  async analyticsFeedback(limit = 50): Promise<{ items: FeedbackItem[] }> {
+    return request(`/analytics/feedback?limit=${limit}`);
   },
 
   // Audit logs (admin)

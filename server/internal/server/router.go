@@ -526,6 +526,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	protected.Put("/conversations/:id/pin", chatHandler.SetPinned)
 	protected.Get("/conversations/:id/export", chatHandler.Export)
 	protected.Get("/conversations/:id/messages", chatHandler.ListMessages)
+	protected.Post("/conversations/:id/messages/:messageId/vote", chatHandler.VoteMessage)
 	protected.Delete("/conversations/:id", chatHandler.Delete)
 	protected.Post("/conversations/:id/messages/stream", chatHandler.Stream)
 	protected.Post("/knowledge-bases/:kbId/test-chat", kbRead, chatHandler.TestChat)
@@ -570,6 +571,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	analyticsGrp.Get("/documents", analyticsHandler.DocStats)
 	analyticsGrp.Get("/usage", analyticsHandler.KBUsage)
 	analyticsGrp.Get("/activity", analyticsHandler.RecentActivity)
+	analyticsGrp.Get("/feedback", analyticsHandler.Feedback)
 
 	// Audit logging (admin only).
 	auditHandler := audit.NewHandler(auditSvc)

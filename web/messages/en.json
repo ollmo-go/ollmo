@@ -84,6 +84,7 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "chunks": "Chunks",
+    "hits": "Hits",
     "created": "Created",
     "actions": "Actions",
     "delete": "Delete",
@@ -715,7 +716,14 @@
     "chunk_count": "Chunks",
     "convs": "Conversations",
     "recent_activity": "Recent Activity",
-    "no_activity": "No recent activity"
+    "no_activity": "No recent activity",
+    "feedback": "Answer Feedback",
+    "no_feedback": "No feedback yet",
+    "feedback_vote": "Vote",
+    "feedback_question": "Question",
+    "feedback_answer": "Answer",
+    "feedback_user": "User",
+    "feedback_time": "Time"
   },
   "audit": {
     "title": "Audit Log",

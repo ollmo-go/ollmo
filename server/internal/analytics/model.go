@@ -43,3 +43,17 @@ type ActivityItem struct {
 	KbID      string `json:"kb_id"`
 	CreatedAt string `json:"created_at"`
 }
+
+// FeedbackItem is one voted assistant message: the user question that led to
+// it, the answer, and the vote. Downvotes are the bad-case review list.
+type FeedbackItem struct {
+	ID             string `json:"id"`
+	ConversationID string `json:"conversation_id"`
+	KbID           string `json:"kb_id"`
+	KbName         string `json:"kb_name"`
+	UserName       string `json:"user_name"`
+	Question       string `json:"question"`
+	Answer         string `json:"answer"`
+	Vote           string `json:"vote"` // "up" or "down"
+	CreatedAt      string `json:"created_at"`
+}

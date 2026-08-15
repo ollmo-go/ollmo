@@ -145,6 +145,29 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     });
   }, [messages, streamedText, streamedThinking, pendingCitations]);
 
+  // Measure the floating input bar so the scroll area reserves exactly its
+  // height (plus breathing room) as bottom padding. This lets the last
+  // message scroll up past the input bar instead of hard-stopping at its
+  // top edge, while auto-scroll keeps the tail just above the input.
+  const inputBarRef = useRef<HTMLDivElement>(null);
+  const [inputBarH, setInputBarH] = useState(220);
+  useEffect(() => {
+    let ro: ResizeObserver | null = null;
+    const raf = requestAnimationFrame(() => {
+      const el = inputBarRef.current;
+      if (!el) return;
+      ro = new ResizeObserver(() => {
+        if (inputBarRef.current) setInputBarH(inputBarRef.current.offsetHeight);
+      });
+      ro.observe(el);
+      setInputBarH(el.offsetHeight);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+    };
+  }, [selectedConv]);
+
   function selectConv(id: string) {
     setSelectedConv(id);
     const url = id ? "/?c=" + id : "/";
@@ -347,6 +370,19 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
   }
 
   const canSend = !!selectedKb && !streaming && draft.trim().length > 0;
+
+  // Vote feedback on an assistant message. Clicking the active icon clears
+  // the vote; optimistic update with rollback on failure.
+  async function vote(m: Message, v: "up" | "down") {
+    const next = m.vote === v ? "" : v;
+    setMessages((ms) => ms.map((x) => (x.id === m.id ? { ...x, vote: next || undefined } : x)));
+    try {
+      await api.voteMessage(m.conversation_id, m.id, next);
+    } catch (e: any) {
+      setMessages((ms) => ms.map((x) => (x.id === m.id ? { ...x, vote: m.vote } : x)));
+      toast.error(e?.message || "Vote failed");
+    }
+  }
 
   const chatInput = (
     <div className="rounded-2xl border bg-background shadow-sm">
@@ -574,7 +610,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         </CardContent>
       </Card>
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 relative">
         <div className="flex items-center justify-between mb-3 gap-2">
           <Button
             variant="outline"
@@ -603,10 +639,23 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         </div>
         {selectedConv ? (
           <>
+            {/* Scroll area extends to the container bottom; the input bar
+                floats above it. Reserved bottom padding equals the measured
+                input bar height, so the last message can scroll up past the
+                input instead of stopping at its top edge. */}
             <div ref={scrollRef} className="flex-1 overflow-auto">
-              <div className="max-w-3xl mx-auto space-y-4 pr-2">
+              <div
+                className="max-w-3xl mx-auto space-y-4 pr-2"
+                style={{ paddingBottom: inputBarH + 24 }}
+              >
                 {messages.map((m) => (
-                  <MessageBubble key={m.id} message={m} kbId={selectedKb} onEditSend={(text) => send(text)} />
+                  <MessageBubble
+                    key={m.id}
+                    message={m}
+                    kbId={selectedKb}
+                    onEditSend={m.role === "user" ? (text) => send(text) : undefined}
+                    onVote={m.role === "assistant" && m.id !== "greeting" ? (v) => vote(m, v) : undefined}
+                  />
                 ))}
                 {streaming && (
                   <MessageBubble
@@ -627,11 +676,17 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                 )}
               </div>
             </div>
-            <div className="pt-3 max-w-3xl mx-auto w-full">
-              {chatInput}
-              <p className="pt-2 text-center text-xs text-muted-foreground/60 select-none">
-                {t("chat.ai_disclaimer")}
-              </p>
+            {/* Floating input bar with a soft gradient above it */}
+            <div ref={inputBarRef} className="absolute bottom-0 left-0 right-0 z-10">
+              <div className="h-10 bg-gradient-to-t from-background to-transparent pointer-events-none" />
+              <div className="bg-background pb-1">
+                <div className="max-w-3xl mx-auto w-full">
+                  {chatInput}
+                  <p className="pt-2 text-center text-xs text-muted-foreground/60 select-none">
+                    {t("chat.ai_disclaimer")}
+                  </p>
+                </div>
+              </div>
             </div>
           </>
         ) : (

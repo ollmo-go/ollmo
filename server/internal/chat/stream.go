@@ -47,11 +47,11 @@ func promptBudget(p *llm.LLMModel) int {
 // graphDeps builds the ExecutionDeps for the graph executor from the chat
 // service's wired collaborators. Called once per stream; the closures capture
 // tenantID/kbID/query from the surrounding scope.
-func (s *Service) graphDeps(tenantID, kbID, query string) agent.ExecutionDeps {
+func (s *Service) graphDeps(tenantID, kbID, query string, trackHits bool) agent.ExecutionDeps {
 	return agent.ExecutionDeps{
 		Search: func(ctx context.Context, tid, kid, q string, topK int, rerank bool, rerankModelID string, useGraph bool) (string, int, float64, string, []any, error) {
 			r, err := s.searchSvc.Search(ctx, tid, kid, search.SearchRequest{
-				Query: q, TopK: topK, Rerank: &rerank, RerankModelID: rerankModelID,
+				Query: q, TopK: topK, Rerank: &rerank, RerankModelID: rerankModelID, TrackHits: trackHits,
 			})
 			if err != nil {
 				return "", 0, 0, "", nil, err
@@ -81,7 +81,7 @@ func (s *Service) graphDeps(tenantID, kbID, query string) agent.ExecutionDeps {
 // DebugAgentNode runs one agent node in isolation for the canvas "test this
 // node" action. Nothing is persisted.
 func (s *Service) DebugAgentNode(ctx context.Context, tenantID, kbID string, node agent.Node, query string) (*agent.NodeDebugResult, error) {
-	deps := s.graphDeps(tenantID, kbID, query)
+	deps := s.graphDeps(tenantID, kbID, query, false)
 	return agent.DebugNode(ctx, deps, tenantID, kbID, node, query)
 }
 
@@ -221,7 +221,7 @@ func (s *Service) runStream(
 		}
 		rerank := cfg.Rerank
 		r, err := s.searchSvc.Search(ctx, tenantID, conv.KbID, search.SearchRequest{
-			Query: query, TopK: topK, Rerank: &rerank, RerankModelID: cfg.RerankModelID,
+			Query: query, TopK: topK, Rerank: &rerank, RerankModelID: cfg.RerankModelID, TrackHits: true,
 		})
 		if err != nil {
 			log.Printf("[chat] retrieval failed tenant=%s kb=%s: %v", tenantID, conv.KbID, err)
@@ -323,7 +323,7 @@ func (s *Service) runGraph(
 	persist bool,
 ) {
 	totalStart := time.Now()
-	deps := s.graphDeps(tenantID, kbID, query)
+	deps := s.graphDeps(tenantID, kbID, query, persist)
 
 	// Load history for LLM nodes (test mode has no history).
 	var history []*Message

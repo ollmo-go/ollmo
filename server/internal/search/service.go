@@ -243,6 +243,22 @@ func (s *Service) Search(ctx context.Context, tenantID, kbID string, req SearchR
 	// (no parent) pass through unchanged.
 	hits = s.expandParents(tenantID, hits)
 
+	// Hit statistics: bump chunks.hit_num for the final cited set. Only real
+	// chat retrievals pass TrackHits; failures are non-fatal by design.
+	if req.TrackHits && len(hits) > 0 {
+		ids := make([]string, 0, len(hits))
+		seenHit := make(map[string]bool, len(hits))
+		for _, h := range hits {
+			if !seenHit[h.ChunkID] {
+				seenHit[h.ChunkID] = true
+				ids = append(ids, h.ChunkID)
+			}
+		}
+		if err := s.docRepo.IncrementChunkHits(tenantID, ids); err != nil {
+			log.Printf("[search] track hits failed tenant=%s kb=%s: %v", tenantID, kbID, err)
+		}
+	}
+
 	// 7. GraphRAG: query the knowledge graph for entities mentioned in the
 	// query and include their descriptions + relationships as supplementary
 	// context. Non-fatal: empty graph context is fine for KBs without

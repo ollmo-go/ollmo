@@ -9,11 +9,13 @@ import {
   HardDrive,
   Layers,
   Activity,
+  ThumbsDown,
+  ThumbsUp,
   type LucideIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, AnalyticsOverview, AnalyticsDocStats, KBUsage, ActivityItem } from "@/lib/api";
+import { api, AnalyticsOverview, AnalyticsDocStats, KBUsage, ActivityItem, FeedbackItem } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { formatSize, formatTime } from "@/lib/utils";
 
@@ -75,6 +77,7 @@ export default function AnalyticsPage() {
   const { data: docStats } = useSWR<AnalyticsDocStats>("analytics-docs", () => api.analyticsDocStats());
   const { data: usage } = useSWR<{ items: KBUsage[] }>("analytics-usage", () => api.analyticsUsage());
   const { data: activity } = useSWR<{ items: ActivityItem[] }>("analytics-activity", () => api.analyticsActivity(20));
+  const { data: feedback } = useSWR<{ items: FeedbackItem[] }>("analytics-feedback", () => api.analyticsFeedback(50));
 
   return (
     <div className="space-y-6">
@@ -203,6 +206,55 @@ export default function AnalyticsPage() {
                       <td className="py-2 px-4 text-right tabular-nums">{u.chunk_count}</td>
                       <td className="py-2 px-4 text-right tabular-nums">{u.conversations}</td>
                       <td className="py-2 px-4 text-right tabular-nums">{formatSize(u.storage_bytes)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      {/* Voted messages: downvotes are the bad-case review list */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Badge icon={ThumbsDown} color="rose" />
+            {t("analytics.feedback")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!feedback ? (
+            <Skeleton className="h-20 w-full" />
+          ) : feedback.items?.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("analytics.no_feedback")}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-muted-foreground border-b">
+                    <th className="pb-2 pr-4 font-medium">{t("analytics.feedback_vote")}</th>
+                    <th className="pb-2 px-4 font-medium">{t("analytics.feedback_question")}</th>
+                    <th className="pb-2 px-4 font-medium">{t("analytics.feedback_answer")}</th>
+                    <th className="pb-2 px-4 font-medium">{t("analytics.kb_name")}</th>
+                    <th className="pb-2 px-4 font-medium">{t("analytics.feedback_user")}</th>
+                    <th className="pb-2 pl-4 font-medium text-right">{t("analytics.feedback_time")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {feedback.items?.map((f) => (
+                    <tr key={f.id} className="border-b last:border-0 hover:bg-muted/40">
+                      <td className="py-2 pr-4">
+                        {f.vote === "down" ? (
+                          <ThumbsDown className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
+                        ) : (
+                          <ThumbsUp className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                        )}
+                      </td>
+                      <td className="py-2 px-4 truncate max-w-[220px]">{f.question}</td>
+                      <td className="py-2 px-4 truncate max-w-[280px] text-muted-foreground">{f.answer}</td>
+                      <td className="py-2 px-4 truncate max-w-[140px]">{f.kb_name}</td>
+                      <td className="py-2 px-4 truncate max-w-[120px]">{f.user_name}</td>
+                      <td className="py-2 pl-4 text-right text-xs text-muted-foreground whitespace-nowrap">{formatTime(f.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>

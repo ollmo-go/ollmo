@@ -25,3 +25,7 @@ func (s *Service) KBUsage(ctx context.Context, tenantID string) ([]KBUsage, erro
 func (s *Service) RecentActivity(ctx context.Context, tenantID string, limit int) ([]ActivityItem, error) {
 	return s.repo.RecentActivity(tenantID, limit)
 }
+
+func (s *Service) Feedback(ctx context.Context, tenantID string, limit int) ([]FeedbackItem, error) {
+	return s.repo.Feedback(tenantID, limit)
+}

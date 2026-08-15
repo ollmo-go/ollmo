@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Brain, Check, Copy, FileText, Pencil, Send, X } from "lucide-react";
+import { Brain, Check, Copy, FileText, Pencil, Send, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { api, Citation, Message } from "@/lib/api";
@@ -21,12 +21,16 @@ export function MessageBubble({
   isThinking,
   kbId,
   onEditSend,
+  onVote,
 }: {
   message: Message;
   streaming?: boolean;
   isThinking?: boolean;
   kbId?: string;
   onEditSend?: (text: string) => void;
+  // Vote feedback (persisted messages only). Receiving the current vote
+  // value again clears it.
+  onVote?: (vote: "up" | "down") => void;
 }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
@@ -182,6 +186,26 @@ export function MessageBubble({
             >
               {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
             </button>
+            {onVote && (
+              <>
+                <button
+                  onClick={() => onVote("up")}
+                  aria-label={t("chat.vote_up")}
+                  title={t("chat.vote_up")}
+                  className={`hover:text-foreground flex items-center gap-1 ${message.vote === "up" ? "text-green-600 dark:text-green-400" : ""}`}
+                >
+                  <ThumbsUp className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => onVote("down")}
+                  aria-label={t("chat.vote_down")}
+                  title={t("chat.vote_down")}
+                  className={`hover:text-foreground flex items-center gap-1 ${message.vote === "down" ? "text-red-600 dark:text-red-400" : ""}`}
+                >
+                  <ThumbsDown className="h-3 w-3" />
+                </button>
+              </>
+            )}
             {hasStats && (
               <span className="flex items-center gap-2 select-none">
                 {(message.retrieve_ms ?? 0) > 0 && (

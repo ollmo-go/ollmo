@@ -83,6 +83,41 @@ func (r *Repo) UpdateDocMetadata(tenantID, kbID, id, metadata string) error {
 	return nil
 }
 
+// IncrementChunkHits atomically bumps hit_num for cited chunks. Called after
+// a real chat retrieval; failures are non-fatal and logged by the caller.
+func (r *Repo) IncrementChunkHits(tenantID string, chunkIDs []string) error {
+	if len(chunkIDs) == 0 {
+		return nil
+	}
+	return r.db.Model(&Chunk{}).
+		Where("tenant_id = ? AND id IN ?", tenantID, chunkIDs).
+		UpdateColumn("hit_num", gorm.Expr("hit_num + 1")).Error
+}
+
+// DocHitStats returns doc_id -> summed chunk hit_num for the given documents,
+// powering the hit-count column in the document list.
+func (r *Repo) DocHitStats(tenantID string, docIDs []string) (map[string]int64, error) {
+	out := make(map[string]int64, len(docIDs))
+	if len(docIDs) == 0 {
+		return out, nil
+	}
+	type row struct {
+		DocID string
+		Hits  int64
+	}
+	var rows []row
+	if err := r.db.Model(&Chunk{}).
+		Select("doc_id, COALESCE(SUM(hit_num),0) AS hits").
+		Where("tenant_id = ? AND doc_id IN ?", tenantID, docIDs).
+		Group("doc_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, rw := range rows {
+		out[rw.DocID] = rw.Hits
+	}
+	return out, nil
+}
+
 func (r *Repo) SetDocEnabled(tenantID, kbID, id string, enabled bool) error {
 	res := r.db.Model(&Document{}).
 		Where("tenant_id = ? AND kb_id = ? AND id = ?", tenantID, kbID, id).

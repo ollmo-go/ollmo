@@ -37,7 +37,10 @@ type Message struct {
 	PromptTokens     int       `gorm:"default:0" json:"prompt_tokens,omitempty"`
 	CompletionTokens int       `gorm:"default:0" json:"completion_tokens,omitempty"`
 	TotalTokens      int       `gorm:"default:0" json:"total_tokens,omitempty"`
-	CreatedAt        time.Time `gorm:"index:idx_msg_tenant_conv_created,priority:3" json:"created_at"`
+	// Vote is the user's feedback on an assistant message: "", "up", or
+	// "down". Downvotes surface in analytics for bad-case review.
+	Vote      string    `gorm:"size:8;not null;default:''" json:"vote,omitempty"`
+	CreatedAt time.Time `gorm:"index:idx_msg_tenant_conv_created,priority:3" json:"created_at"`
 }
 
 // Citation maps a retrieved chunk back to its source document. The chat

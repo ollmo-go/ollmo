@@ -115,6 +115,21 @@ func (h *Handler) ListMessages(c *fiber.Ctx) error {
 	return response.OK(c, fiber.Map{"items": msgs})
 }
 
+// VoteMessage records like/dislike feedback on an assistant message. Sending
+// the same vote again clears it (vote="").
+func (h *Handler) VoteMessage(c *fiber.Ctx) error {
+	var in struct {
+		Vote string `json:"vote"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
+	}
+	if err := h.svc.VoteMessage(c.Context(), middleware.TenantID(c), middleware.UserID(c), c.Params("id"), c.Params("messageId"), in.Vote); err != nil {
+		return response.Fail(c, err)
+	}
+	return response.OK(c, fiber.Map{"vote": in.Vote})
+}
+
 func (h *Handler) Delete(c *fiber.Ctx) error {
 	if err := h.svc.Delete(c.Context(), middleware.TenantID(c), middleware.UserID(c), c.Params("id")); err != nil {
 		return response.Fail(c, err)

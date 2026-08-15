@@ -117,3 +117,29 @@ func (r *Repo) RecentActivity(tenantID string, limit int) ([]ActivityItem, error
 	merged := append(docs, convs...)
 	return merged, nil
 }
+
+// Feedback lists voted assistant messages with the user question that led to
+// each answer. The preceding user message is resolved with a correlated
+// subquery (latest user message before the assistant one).
+func (r *Repo) Feedback(tenantID string, limit int) ([]FeedbackItem, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	var items []FeedbackItem
+	err := r.db.Raw(`
+		SELECT m.id, m.conversation_id, cv.kb_id,
+			k.name AS kb_name, u.name AS user_name,
+			(SELECT q.content FROM messages q
+			 WHERE q.tenant_id = m.tenant_id AND q.conversation_id = m.conversation_id
+			   AND q.role = 'user' AND q.created_at <= m.created_at
+			 ORDER BY q.created_at DESC LIMIT 1) AS question,
+			m.content AS answer, m.vote, m.created_at
+		FROM messages m
+		JOIN conversations cv ON cv.id = m.conversation_id AND cv.tenant_id = m.tenant_id
+		LEFT JOIN knowledge_bases k ON k.id = cv.kb_id AND k.tenant_id = m.tenant_id
+		LEFT JOIN users u ON u.id = cv.owner_id
+		WHERE m.tenant_id = ? AND m.role = 'assistant' AND m.vote <> ''
+		ORDER BY m.created_at DESC
+		LIMIT ?`, tenantID, limit).Scan(&items).Error
+	return items, err
+}
