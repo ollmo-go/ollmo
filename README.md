@@ -23,6 +23,8 @@ English | [简体中文](README.zh-CN.md)
 
 ![ollmo agent](agent-canvas.png)
 
+![ollmo provider models](provider-models.png)
+
 ![ollmo chat](chat.png)
 
 ## Why ollmo
@@ -45,7 +47,7 @@ ollmo converges everything into three steps: **upload documents, ask questions, 
 - **Agent Canvas** — Visual agent pipeline (React Flow): intent classification → retrieval → condition branch → LLM → direct reply. Node outputs are referenceable variables (`{node.output}`) in prompts and conditions, enabling LLM chaining and generic branching; per-node debug shows output variables, and nodes highlight live during execution. In-canvas undo/redo and sticky notes. Per-KB system prompt, temperature, top_k, rerank toggle, opening message, and LLM selection.
 - **Ingestion Pipeline Canvas** — Visual ingestion DAG (React Flow): source → parser → chunker → embedder → sink, with configurable parsing options, chunking strategy, and batch size.
 - **GraphRAG** — LLM-powered entity & relation extraction at ingestion; entity matching enriches retrieval context at query time.
-- **Configurable Models** — Tenant-level LLM / Embedding / Rerank provider management via web UI, with per-KB overrides. Selection priority: KB config → tenant default → config.yaml.
+- **Configurable Models** — Tenant-level LLM / Embedding / Rerank provider management via web UI, with per-KB overrides. Two-column popup selector (provider list on left, models on right) for intuitive model switching. Selection priority: KB config → tenant default → config.yaml.
 - **Team & Access Control** — Invitation-based membership with owner / admin / member roles, per-user daily message quotas, KB-level membership (viewer / editor / owner).
 - **Admin Console** — Super-admin user management, tenant management with plan & quota control (free / pro / enterprise), system settings (registration toggle, auto-memory), analytics dashboard, and audit logging.
 - **External API** — API-key authenticated programmatic access (search, KB management, streaming chat).
@@ -186,6 +188,19 @@ make worker
 ```bash
 make web          # http://localhost:3001
 ```
+
+### 6. One-click install
+
+Open http://localhost:3001 — the install wizard appears on first visit. Fill in the admin email, password, and optionally a SiliconFlow API key. On confirm, the system automatically:
+
+1. Creates the admin tenant and super-admin user
+2. Seeds a SiliconFlow provider with LLM (DeepSeek-V4-Flash), embedding (BGE-Large-ZH), and rerank (BGE-Reranker-V2-M3) models
+3. Creates a **demo knowledge base** with a standard-template agent canvas (intent classifier → retrieval → condition → LLM / direct reply + free-chat branch)
+4. Uploads a demo document that is automatically parsed, chunked, and embedded
+
+After install, you can immediately ask questions on the home page — no manual configuration needed.
+
+> Registration is **disabled** by default after install. Enable it via System Settings when you are ready to invite users.
 
 ### Full stack via Docker
 

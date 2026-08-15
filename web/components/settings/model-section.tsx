@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { Pencil, Plus, Trash2, Zap } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Paginated } from "@/lib/api";
+import { DiscoveredModel, Paginated } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { useConfirm } from "@/components/ui/confirm";
@@ -37,6 +37,15 @@ export interface ModelField {
   parse?: (v: string) => unknown;
 }
 
+// DiscoverConfig wires the "fetch available models" action into a section:
+// fn receives the current form (endpoint/api_key) plus the id of the model
+// being edited (so the backend can reuse its stored key); picking a
+// candidate applies applyCandidate to the form, defaulting to {model: id}.
+export interface DiscoverConfig {
+  fn: (form: Record<string, unknown>, editId: string | null) => Promise<DiscoveredModel[]>;
+  applyCandidate?: (candidate: DiscoveredModel) => Record<string, unknown>;
+}
+
 export interface ModelSectionConfig<T extends BaseModel> {
   swrKey: string;
   listFn: () => Promise<Paginated<T>>;
@@ -56,6 +65,7 @@ export interface ModelSectionConfig<T extends BaseModel> {
   fields: ModelField[];
   renderSecondary: (p: T, t: (key: string) => string) => string;
   formatTestReply?: (reply: string, t: (key: string) => string) => string;
+  discover?: DiscoverConfig;
 }
 
 export function ModelSection<T extends BaseModel>({
@@ -75,6 +85,9 @@ export function ModelSection<T extends BaseModel>({
   const [form, setForm] = useState<Record<string, unknown>>(config.defaultForm);
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [candidates, setCandidates] = useState<DiscoveredModel[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [discovered, setDiscovered] = useState(false);
 
   const isCreate = mode === "create";
 
@@ -82,12 +95,41 @@ export function ModelSection<T extends BaseModel>({
     setMode("create");
     setEditId(null);
     setForm({ ...config.defaultForm });
+    setCandidates([]);
+    setDiscovered(false);
   }
 
   function openEdit(p: T) {
     setMode("edit");
     setEditId(p.id);
     setForm(config.toEditForm(p));
+    setCandidates([]);
+    setDiscovered(false);
+  }
+
+  async function discover() {
+    if (!form.endpoint) {
+      toast.error(t(`${ns}.required_fields`));
+      return;
+    }
+    setDiscovering(true);
+    try {
+      const items = await config.discover!.fn(form, editId);
+      setCandidates(items);
+      setDiscovered(true);
+      if (items.length === 0) toast.info(t("settings.fetch_models_empty"));
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setDiscovering(false);
+    }
+  }
+
+  function pickCandidate(m: DiscoveredModel) {
+    const updates = config.discover!.applyCandidate
+      ? config.discover!.applyCandidate(m)
+      : { model: m.id };
+    setForm({ ...form, ...updates });
   }
 
   async function save() {
@@ -246,6 +288,48 @@ export function ModelSection<T extends BaseModel>({
               />
             ))}
           </div>
+          {config.discover && (
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>{t("settings.available_models")}</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={discovering}
+                  onClick={discover}
+                >
+                  <RefreshCw className={cn("h-3.5 w-3.5 mr-1", discovering && "animate-spin")} />
+                  {t("settings.fetch_models")}
+                </Button>
+              </div>
+              {candidates.length > 0 && (
+                <div className="max-h-48 overflow-y-auto rounded-md border border-input divide-y">
+                  {candidates.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={cn(
+                        "w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted",
+                        form.model === m.id && "bg-muted"
+                      )}
+                      onClick={() => pickCandidate(m)}
+                    >
+                      <span className="truncate font-mono text-xs">{m.name || m.id}</span>
+                      {!!m.context_length && (
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {m.context_length.toLocaleString()} ctx
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {discovered && candidates.length === 0 && (
+                <p className="text-xs text-muted-foreground">{t("settings.fetch_models_empty")}</p>
+              )}
+            </div>
+          )}
         </Drawer>
       )}
     </>

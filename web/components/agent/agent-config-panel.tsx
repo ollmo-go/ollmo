@@ -2,10 +2,11 @@
 
 import { useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { AgentEdge, AgentNode, LLMModel, NodeDebugResult, Paginated, RerankModel, api } from "@/lib/api";
+import { AgentEdge, AgentNode, LLMModel, NodeDebugResult, Paginated, ProviderCard, RerankModel, api } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { ChevronDown, Copy, Loader2, Play, Plus, Trash2, Variable } from "lucide-react";
+import { ProviderModelSelect } from "@/components/ui/provider-model-select";
 
 const NODE_TYPE_KEY: Record<string, string> = {
   retrieval: "node_retrieval",
@@ -70,6 +71,10 @@ export function AgentConfigPanel({
     api.listReranks(1, 50)
   );
   const reranks = reranksData?.items ?? [];
+  const { data: providerCards } = useSWR<ProviderCard[]>("providers", () =>
+    api.providers.list()
+  );
+  const providers = providerCards ?? [];
 
   // Node config takes precedence, then edge config, then agent-level settings.
   if (node) {
@@ -84,7 +89,7 @@ export function AgentConfigPanel({
             <span className="ml-2 font-mono text-xs text-muted-foreground">{String(node.data.slug)}</span>
           ) : null}
         </div>
-        {renderEditor(node, (patch) => onChange(node.id, { ...node.data, ...patch }), t, llms, reranks, allNodes, allEdges)}
+        {renderEditor(node, (patch) => onChange(node.id, { ...node.data, ...patch }), t, llms, reranks, providers, allNodes, allEdges)}
         {/* Single-node debug: run the selected node in isolation. Notes are
             display-only and never execute, so they skip this section. */}
         {kbId && node.type !== "note" && (
@@ -198,6 +203,7 @@ function renderEditor(
   t: ReturnType<typeof useTranslations>,
   llms: LLMModel[],
   reranks: RerankModel[],
+  providers: ProviderCard[],
   allNodes: AgentNode[],
   allEdges: AgentEdge[],
 ) {
@@ -221,18 +227,15 @@ function renderEditor(
           <Toggle label={t("agent.field_rerank")} checked={!!node.data.rerank} onChange={(v) => patch({ rerank: v })} />
           {!!node.data.rerank && (
             <Field label={t("agent.field_rerank_model")}>
-              <select
+              <ProviderModelSelect
+                models={reranks}
+                providers={providers}
                 value={String(node.data.rerank_model_id || "")}
-                onChange={(e) => patch({ rerank_model_id: e.target.value })}
-                className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
-              >
-                <option value="">{t("agent.rerank_default")}</option>
-                {reranks.filter((p) => p.status === "active").map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => patch({ rerank_model_id: v })}
+                defaultLabel={t("agent.rerank_default")}
+                providerAllLabel={t("common.provider_all")}
+                otherLabel={t("common.provider_other")}
+              />
             </Field>
           )}
           <Toggle
@@ -246,18 +249,15 @@ function renderEditor(
       return (
         <>
           <Field label={t("agent.field_llm_model")}>
-            <select
+            <ProviderModelSelect
+              models={llms}
+              providers={providers}
               value={String(node.data.llm_model_id || "")}
-              onChange={(e) => patch({ llm_model_id: e.target.value })}
-              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
-            >
-              <option value="">{t("agent.llm_default")}</option>
-              {llms.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => patch({ llm_model_id: v })}
+              defaultLabel={t("agent.llm_default")}
+              providerAllLabel={t("common.provider_all")}
+              otherLabel={t("common.provider_other")}
+            />
           </Field>
           <PromptField
             label={t("agent.field_system_prompt")}
@@ -377,18 +377,15 @@ function renderEditor(
       return (
         <>
           <Field label={t("agent.field_llm_model")}>
-            <select
+            <ProviderModelSelect
+              models={llms}
+              providers={providers}
               value={String(node.data.llm_model_id || "")}
-              onChange={(e) => patch({ llm_model_id: e.target.value })}
-              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
-            >
-              <option value="">{t("agent.llm_default")}</option>
-              {llms.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => patch({ llm_model_id: v })}
+              defaultLabel={t("agent.llm_default")}
+              providerAllLabel={t("common.provider_all")}
+              otherLabel={t("common.provider_other")}
+            />
           </Field>
           <div className="block space-y-1">
             <span className="text-xs text-muted-foreground">{t("agent.field_classifier_categories")}</span>

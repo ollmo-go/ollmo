@@ -10,10 +10,11 @@ import (
 	"time"
 )
 
-// EmbeddingClient calls an OpenAI-compatible /v1/embeddings endpoint. This
+// EmbeddingClient calls an OpenAI-compatible embeddings endpoint. This
 // works with OpenAI, Infinity, Xinference, Ollama (with OpenAI adapter), and
 // local vLLM/text-embeddings-inference servers. Only the wire format matters;
-// model routing lives in the server config.
+// model routing lives in the server config. The endpoint includes its version
+// prefix (e.g. .../v1, .../v4), matching the LLM client's convention.
 type EmbeddingClient struct {
 	endpoint string
 	apiKey   string
@@ -47,7 +48,7 @@ func (c *EmbeddingClient) Embed(ctx context.Context, model string, inputs []stri
 		return nil, nil
 	}
 	body, _ := json.Marshal(embeddingRequest{Model: model, Input: inputs})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/v1/embeddings", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/embeddings", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

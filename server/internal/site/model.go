@@ -28,7 +28,9 @@ func Defaults() map[string]string {
 		KeySiteDescription:   "尽享 AI 奥妙",
 		KeyDefaultLanguage:   "zh",
 		KeyTimezone:          "Asia/Shanghai",
-		KeyAllowRegistration: "true",
+		// Registration is off by default after install: a fresh deployment
+		// should stay closed until the admin explicitly enables it.
+		KeyAllowRegistration: "false",
 		KeyAutoMemory:        "true",
 	}
 }

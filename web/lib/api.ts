@@ -42,7 +42,6 @@ export interface InstallInput {
   name: string;
   tenant_name: string;
   provider_key: string;
-  provider_name: string;
 }
 
 export interface Paginated<T> {
@@ -168,6 +167,7 @@ export interface LLMModel {
   temperature: number;
   max_tokens: number;
   top_p: number;
+  context_length: number;
   is_default: boolean;
   owner_id: string;
   status: string;
@@ -177,9 +177,56 @@ export interface LLMModel {
   updated_at: string;
 }
 
+// Candidate from an OpenAI-compatible GET /models listing. context_length /
+// max_tokens are present only when the endpoint reports them.
+export interface DiscoveredModel {
+  id: string;
+  name?: string;
+  context_length?: number;
+  max_tokens?: number;
+}
+
+// Static catalog entry: a known vendor with a default endpoint and curated
+// models, so adding the provider needs only an API key.
+export interface CatalogProvider {
+  id: string;
+  name: string;
+  endpoint: string;
+  note?: string;
+  chat_models: { id: string; context_length?: number; note?: string }[];
+  embedding_models: { id: string; context_length?: number; note?: string }[];
+  rerank_models: { id: string; context_length?: number; note?: string }[];
+}
+
+// One model row bound to a provider card.
+export interface ProviderModelRef {
+  id: string;
+  name: string;
+  model: string;
+  context_length?: number;
+  is_default: boolean;
+  last_test_status: string;
+}
+
+// Provider card: endpoint + one write-only credential + bound models for each kind.
+export interface ProviderCard {
+  id: string;
+  tenant_id: string;
+  catalog_id: string;
+  name: string;
+  endpoint: string;
+  has_key: boolean;
+  created_at: string;
+  updated_at: string;
+  chat_models: ProviderModelRef[];
+  embed_models: ProviderModelRef[];
+  rerank_models: ProviderModelRef[];
+}
+
 export interface EmbeddingModel {
   id: string;
   tenant_id: string;
+  provider_id?: string;
   name: string;
   endpoint: string;
   api_key?: string;
@@ -198,6 +245,7 @@ export interface EmbeddingModel {
 export interface RerankModel {
   id: string;
   tenant_id: string;
+  provider_id?: string;
   name: string;
   endpoint: string;
   api_key?: string;
@@ -883,6 +931,86 @@ export const api = {
   },
   async testRerank(id: string): Promise<{ reply: string }> {
     return request(`/rerank-models/${id}/test`, { method: "POST" });
+  },
+
+  // Provider cards group model rows under one endpoint+credential
+  // (settings page). kind picks the route group.
+  providers: {
+    async list(): Promise<ProviderCard[]> {
+      const r = await request<{ items: ProviderCard[] }>("/providers");
+      return r.items ?? [];
+    },
+    async catalog(): Promise<CatalogProvider[]> {
+      const r = await request<{ items: CatalogProvider[] }>("/providers/catalog");
+      return r.items ?? [];
+    },
+    async create(body: {
+      catalog_id: string;
+      name?: string;
+      endpoint?: string;
+      api_key?: string;
+      chat_models?: { model: string; name?: string; context_length?: number }[];
+      embed_models?: { model: string; name?: string; context_length?: number }[];
+      rerank_models?: { model: string; name?: string; context_length?: number }[];
+    }): Promise<ProviderCard> {
+      return request("/providers", { method: "POST", body: JSON.stringify(body) });
+    },
+    async update(
+      id: string,
+      body: { name?: string; endpoint?: string; api_key?: string }
+    ): Promise<ProviderCard> {
+      return request(`/providers/${id}`, { method: "PUT", body: JSON.stringify(body) });
+    },
+    async remove(id: string): Promise<void> {
+      await request(`/providers/${id}`, { method: "DELETE" });
+    },
+    async discover(id: string): Promise<DiscoveredModel[]> {
+      const r = await request<{ items: DiscoveredModel[] }>(`/providers/${id}/discover`, {
+        method: "POST",
+      });
+      return r.items ?? [];
+    },
+    // Probe asks an arbitrary endpoint+key (what the form currently shows)
+    // for its model list, before the provider exists or is saved.
+    async probe(body: {
+      endpoint: string;
+      api_key?: string;
+      provider_id?: string;
+    }): Promise<DiscoveredModel[]> {
+      const r = await request<{ items: DiscoveredModel[] }>("/providers/probe", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      return r.items ?? [];
+    },
+    async addModel(
+      id: string,
+      kind: "llm" | "embedding" | "rerank",
+      body: { model: string; name?: string; context_length?: number }
+    ): Promise<ProviderModelRef> {
+      return request(`/providers/${id}/models/${kind}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
+    async updateModel(
+      id: string,
+      kind: "llm" | "embedding" | "rerank",
+      mid: string,
+      body: { name?: string; context_length?: number }
+    ): Promise<ProviderModelRef> {
+      return request(`/providers/${id}/models/${kind}/${mid}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+    },
+    async removeModel(
+      id: string,
+      kind: "llm" | "embedding" | "rerank",
+      mid: string
+    ): Promise<void> {
+      await request(`/providers/${id}/models/${kind}/${mid}`, { method: "DELETE" });
+    },
   },
 
   // Search

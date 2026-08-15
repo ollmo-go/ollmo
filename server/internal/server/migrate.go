@@ -20,6 +20,7 @@ import (
 	"ollmo/ollmo/internal/llm"
 	"ollmo/ollmo/internal/memory"
 	"ollmo/ollmo/internal/pipeline"
+	"ollmo/ollmo/internal/provider"
 	"ollmo/ollmo/internal/rerank"
 	"ollmo/ollmo/internal/site"
 	"ollmo/ollmo/internal/tenant"
@@ -46,6 +47,7 @@ func RunMigrate(cfg *config.Config) error {
 		&llm.LLMModel{},
 		&embedding.EmbeddingModel{},
 		&rerank.RerankModel{},
+		&provider.Provider{},
 		&chat.Conversation{},
 		&chat.Message{},
 		&pipeline.Pipeline{},
@@ -79,7 +81,16 @@ func RunMigrate(cfg *config.Config) error {
 		}
 	}
 
-	log.Println("[migrate] schema applied: tenants, tenant_members, users, knowledge_bases, documents, chunks, llm_models, embedding_models, rerank_models, conversations, messages, pipelines, graph_entities, graph_relations, agents, memories")
+	// Group pre-existing model rows under provider cards so the upgraded
+	// settings page shows them. Idempotent: already-bound rows are skipped.
+	if err := provider.Migrate(gormDB); err != nil {
+		return fmt.Errorf("migrate providers: %w", err)
+	}
+	if err := provider.Backfill(gormDB); err != nil {
+		return fmt.Errorf("backfill providers: %w", err)
+	}
+
+	log.Println("[migrate] schema applied: tenants, tenant_members, users, knowledge_bases, documents, chunks, llm_models, embedding_models, rerank_models, model_providers, conversations, messages, pipelines, graph_entities, graph_relations, agents, memories")
 	log.Println("[migrate] fulltext index idx_chunks_content_ft (ngram parser) ensured on chunks.content")
 
 	return nil

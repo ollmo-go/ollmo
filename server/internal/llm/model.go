@@ -20,20 +20,23 @@ const (
 
 // LLMModel is a tenant-scoped chat model configuration. Endpoint and APIKey
 // are OpenAI-compatible; non-OpenAI providers use their compatible endpoints.
+// ProviderID groups rows under a settings provider card; endpoint/api_key
+// stay duplicated on the row so the call path needs no join.
 type LLMModel struct {
-	ID          string    `gorm:"primaryKey;size:36" json:"id"`
-	TenantID    string    `gorm:"size:36;index;not null" json:"tenant_id"`
-	Name        string    `gorm:"size:128;not null" json:"name"`
-	Provider    string    `gorm:"size:32;not null;default:openai" json:"provider"`
-	Endpoint    string    `gorm:"size:512;not null" json:"endpoint"`
-	APIKey      string    `gorm:"size:512" json:"api_key,omitempty"`
-	Model       string    `gorm:"size:128;not null" json:"model"`
-	Temperature float64   `gorm:"not null;default:0.7" json:"temperature"`
-	MaxTokens   int       `gorm:"not null;default:2048" json:"max_tokens"`
+	ID          string  `gorm:"primaryKey;size:36" json:"id"`
+	TenantID    string  `gorm:"size:36;index;not null" json:"tenant_id"`
+	ProviderID  string  `gorm:"size:36;index" json:"provider_id,omitempty"`
+	Name        string  `gorm:"size:128;not null" json:"name"`
+	Provider    string  `gorm:"size:32;not null;default:openai" json:"provider"`
+	Endpoint    string  `gorm:"size:512;not null" json:"endpoint"`
+	APIKey      string  `gorm:"size:512" json:"api_key,omitempty"`
+	Model       string  `gorm:"size:128;not null" json:"model"`
+	Temperature float64 `gorm:"not null;default:0.7" json:"temperature"`
+	MaxTokens   int     `gorm:"not null;default:2048" json:"max_tokens"`
 	// ContextLength is the model's input+output window in tokens. 0 means
 	// unknown; the chat service then assumes DefaultContextLength.
-	ContextLength int     `gorm:"not null;default:0" json:"context_length"`
-	TopP          float64 `gorm:"not null;default:1" json:"top_p"`
+	ContextLength  int        `gorm:"not null;default:0" json:"context_length"`
+	TopP           float64    `gorm:"not null;default:1" json:"top_p"`
 	IsDefault      bool       `gorm:"not null;default:false" json:"is_default"`
 	OwnerID        string     `gorm:"size:36;index;not null" json:"owner_id"`
 	Status         string     `gorm:"size:32;not null;default:active" json:"status"`

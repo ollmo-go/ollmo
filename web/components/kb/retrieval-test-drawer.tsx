@@ -6,9 +6,10 @@ import { Search, Loader2, ToggleLeft, ToggleRight, ChevronDown, ChevronRight } f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Drawer } from "@/components/ui/drawer";
-import { api, Paginated, RerankModel, SearchResult, SearchHit } from "@/lib/api";
+import { api, Paginated, ProviderCard, RerankModel, SearchResult, SearchHit } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import { ProviderModelSelect } from "@/components/ui/provider-model-select";
 
 export function RetrievalTestDrawer({ kbId, onClose }: { kbId: string; onClose: () => void }) {
   const t = useTranslations();
@@ -16,6 +17,10 @@ export function RetrievalTestDrawer({ kbId, onClose }: { kbId: string; onClose: 
     api.listReranks(1, 50)
   );
   const reranks = reranksData?.items ?? [];
+  const { data: providerCards } = useSWR<ProviderCard[]>("providers", () =>
+    api.providers.list()
+  );
+  const providers = providerCards ?? [];
 
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(10);
@@ -106,16 +111,17 @@ export function RetrievalTestDrawer({ kbId, onClose }: { kbId: string; onClose: 
             </button>
 
             {rerank && (
-              <select
-                value={rerankModelId}
-                onChange={(e) => setRerankModelId(e.target.value)}
-                className="rounded-md border border-border bg-background px-2 py-1 text-sm"
-              >
-                <option value="">{t("retrieval_test.rerank_default")}</option>
-                {reranks.filter((r) => r.status === "active").map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
+              <div className="w-64">
+                <ProviderModelSelect
+                  models={reranks}
+                  providers={providers}
+                  value={rerankModelId}
+                  onChange={setRerankModelId}
+                  defaultLabel={t("retrieval_test.rerank_default")}
+                  providerAllLabel={t("common.provider_all")}
+                  otherLabel={t("common.provider_other")}
+                />
+              </div>
             )}
 
             <button

@@ -9,10 +9,13 @@ const (
 
 // EmbeddingModel is a tenant-scoped embedding model configuration. Endpoint
 // and APIKey are OpenAI-compatible /v1/embeddings. Dim is auto-derived from
-// the model name via vector.EmbeddingDim at creation time.
+// the model name via vector.EmbeddingDim at creation time. ProviderID groups
+// rows under a settings provider card; endpoint/api_key stay duplicated on
+// the row so the call path needs no join.
 type EmbeddingModel struct {
 	ID             string     `gorm:"primaryKey;size:36" json:"id"`
 	TenantID       string     `gorm:"size:36;index;not null" json:"tenant_id"`
+	ProviderID     string     `gorm:"size:36;index" json:"provider_id,omitempty"`
 	Name           string     `gorm:"size:128;not null" json:"name"`
 	Endpoint       string     `gorm:"size:512;not null" json:"endpoint"`
 	APIKey         string     `gorm:"size:512" json:"api_key,omitempty"`

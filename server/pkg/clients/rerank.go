@@ -10,10 +10,12 @@ import (
 	"time"
 )
 
-// RerankClient calls a Cohere-style /v1/rerank endpoint. Works with
+// RerankClient calls a Cohere-style rerank endpoint. Works with
 // SiliconFlow, Cohere, Jina, and local text-embeddings-inference servers
 // that expose the same API. The client returns documents reordered by
 // relevance score, which is a cross-encoder signal denser than ANN cosine.
+// The endpoint includes its version prefix (e.g. .../v1), matching the LLM
+// client's convention.
 type RerankClient struct {
 	endpoint string
 	apiKey   string
@@ -84,7 +86,7 @@ func (c *RerankClient) Rerank(ctx context.Context, model, query string, docs []R
 		TopN:            topN,
 		ReturnDocuments: false,
 	})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/v1/rerank", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/rerank", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

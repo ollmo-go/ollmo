@@ -127,7 +127,38 @@ func (r *Repo) Delete(tenantID, id string) error {
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return errs.NotFound("embedding provider not found")
+		return errs.NotFound("embedding model not found")
 	}
 	return nil
+}
+
+// ListByProvider returns the rows grouped under one provider card, oldest
+// first so the card shows a stable order.
+func (r *Repo) ListByProvider(tenantID, providerID string) ([]*EmbeddingModel, error) {
+	var items []*EmbeddingModel
+	if err := r.db.Where("tenant_id = ? AND provider_id = ?", tenantID, providerID).
+		Order("created_at ASC").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	for _, p := range items {
+		p.APIKey = crypto.Decrypt(r.key, p.APIKey)
+	}
+	return items, nil
+}
+
+// DeleteByProvider removes every row bound to a provider card (card delete).
+func (r *Repo) DeleteByProvider(tenantID, providerID string) error {
+	return r.db.Where("tenant_id = ? AND provider_id = ?", tenantID, providerID).
+		Delete(&EmbeddingModel{}).Error
+}
+
+// UpdateProviderCreds re-points rows bound to a provider card at the card's
+// current endpoint/key, keeping rows self-contained for the call path.
+func (r *Repo) UpdateProviderCreds(tenantID, providerID, endpoint, apiKey string) error {
+	return r.db.Model(&EmbeddingModel{}).
+		Where("tenant_id = ? AND provider_id = ?", tenantID, providerID).
+		Updates(map[string]interface{}{
+			"endpoint": endpoint,
+			"api_key":  crypto.Encrypt(r.key, apiKey),
+		}).Error
 }

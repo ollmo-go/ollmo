@@ -360,3 +360,72 @@ func BuildDefaultDefinition() Definition {
 		},
 	}
 }
+
+// Standard-template prompts, mirroring the frontend "standard" template so a
+// seeded graph behaves identically to one built in the canvas UI.
+const (
+	standardRAGPrompt    = "你是知识库问答助手。请根据检索到的上下文回答用户的问题 {query}。只基于提供的上下文回答，不要编造信息；如果上下文中没有答案，请如实说明。"
+	standardFreePrompt   = "你是一个友好的助手，请根据上下文回答用户问题。如果上下文没有相关信息，可以与用户自由对话。"
+	standardFallbackText = "抱歉，未在知识库中找到相关内容，请换个问法或补充更多细节。"
+	standardOpeningMsg   = "你好！我是知识库助手，你可以向我提问知识库中的内容。"
+	standardCatKB        = "知识库问题"
+	standardCatKBDest    = "需要查询知识库文档才能回答的问题，例如文档中涉及的产品、技术或流程"
+	standardCatChat      = "闲聊"
+	standardCatChatDesc  = "问候、闲聊、通用常识等与知识库文档无关的对话"
+	standardBranchTrue   = "满足"
+	standardBranchFalse  = "不满足"
+)
+
+// BuildStandardDefinition creates the teaching template graph:
+// classifier → retrieval → condition → llm/message, plus a free-chat llm
+// branch off the classifier. llmModelID/rerankModelID are the tenant's
+// freshly seeded defaults; empty strings fall back to tenant defaults at
+// execution time, so the graph works without manual wiring.
+//
+// Node positions are the exact output of the frontend canvas "standard"
+// template after dagre auto-layout (rankdir=LR, nodesep=50, ranksep=110,
+// 208x76 nodes), so a seeded canvas is stored already tidied up and renders
+// identically to one applied in the UI.
+func BuildStandardDefinition(llmModelID, rerankModelID string) Definition {
+	return Definition{
+		OpeningMessage: standardOpeningMsg,
+		Nodes: []Node{
+			{ID: "n1", Type: NodeClassifier, Position: Position{X: 40, Y: 166},
+				Data: map[string]interface{}{
+					"slug":         "classifier_1",
+					"llm_model_id": llmModelID,
+					"categories": []map[string]interface{}{
+						{"name": standardCatKB, "description": standardCatKBDest},
+						{"name": standardCatChat, "description": standardCatChatDesc},
+					},
+				}},
+			{ID: "n2", Type: NodeRetrieval, Position: Position{X: 358, Y: 103},
+				Data: map[string]interface{}{
+					"slug": "retrieval_1", "top_k": 10, "rerank": true, "use_graph": true, "rerank_model_id": rerankModelID,
+				}},
+			{ID: "n3", Type: NodeCondition, Position: Position{X: 676, Y: 103},
+				Data: map[string]interface{}{
+					"variable": "retrieval_1.top_score", "operator": ">", "value": "0.35",
+				}},
+			{ID: "n4", Type: NodeLLM, Position: Position{X: 994, Y: 40},
+				Data: map[string]interface{}{
+					"slug": "llm_1", "llm_model_id": llmModelID, "system_prompt": standardRAGPrompt, "temperature": 0.7, "max_tokens": 2048, "top_p": 0.9,
+				}},
+			{ID: "n5", Type: NodeMessage, Position: Position{X: 994, Y: 166},
+				Data: map[string]interface{}{
+					"slug": "message_1", "text": standardFallbackText,
+				}},
+			{ID: "n6", Type: NodeLLM, Position: Position{X: 358, Y: 229},
+				Data: map[string]interface{}{
+					"slug": "llm_2", "llm_model_id": llmModelID, "system_prompt": standardFreePrompt, "temperature": 0.7, "max_tokens": 2048, "top_p": 0.9,
+				}},
+		},
+		Edges: []Edge{
+			{ID: "e1-2", Source: "n1", Target: "n2", Label: standardCatKB},
+			{ID: "e1-6", Source: "n1", Target: "n6", Label: standardCatChat},
+			{ID: "e2-3", Source: "n2", Target: "n3"},
+			{ID: "e3-4", Source: "n3", Target: "n4", Label: standardBranchTrue},
+			{ID: "e3-5", Source: "n3", Target: "n5", Label: standardBranchFalse},
+		},
+	}
+}

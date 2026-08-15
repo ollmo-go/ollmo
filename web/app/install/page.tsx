@@ -64,7 +64,6 @@ export default function InstallPage() {
         name,
         tenant_name: tenantName,
         provider_key: providerKey,
-        provider_name: "SiliconFlow",
       });
       useAuthStore.getState().setAuth(res.token, res.tenant_id, res.user_id);
       router.push("/");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -32,12 +32,19 @@ export default function KnowledgeBasesPage() {
   const [query, setQuery] = useState("");
   // Which KB card has its "..." overflow menu open (edit/delete live there).
   const [menuKbId, setMenuKbId] = useState<string | null>(null);
+  // Ref to the menu container (trigger button + dropdown) for click-away detection.
+  const menuContainerRef = useRef<HTMLDivElement>(null);
 
-  // Click-away closes the open card menu. The trigger and menu stop
-  // propagation on mousedown so their own clicks are not swallowed.
+  // Click-away closes the open card menu. Using ref.contains() instead of
+  // stopPropagation because React's synthetic event stopPropagation does not
+  // prevent native document-level mousedown listeners from firing.
   useEffect(() => {
     if (!menuKbId) return;
-    const close = () => setMenuKbId(null);
+    const close = (e: MouseEvent) => {
+      if (!menuContainerRef.current?.contains(e.target as Node)) {
+        setMenuKbId(null);
+      }
+    };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [menuKbId]);
@@ -118,13 +125,15 @@ export default function KnowledgeBasesPage() {
         {filtered?.map((kb) => (
           <Card key={kb.id} className="relative hover:bg-accent/40 transition-colors h-full">
             {/* Low-frequency actions (edit/delete) collapsed into an overflow menu */}
-            <div className="absolute top-1.5 right-1.5 z-10">
+            <div
+              className="absolute top-1.5 right-1.5 z-10"
+              ref={menuKbId === kb.id ? menuContainerRef : null}
+            >
               <Button
                 size="icon"
                 variant="ghost"
                 className="h-7 w-7"
                 aria-label={t("common.more")}
-                onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.preventDefault();
                   setMenuKbId(menuKbId === kb.id ? null : kb.id);
@@ -135,7 +144,6 @@ export default function KnowledgeBasesPage() {
               {menuKbId === kb.id && (
                 <div
                   className="absolute right-0 top-full mt-1 rounded-md border border-border bg-popover shadow-md py-1 w-28"
-                  onMouseDown={(e) => e.stopPropagation()}
                 >
                   <button
                     onClick={() => { setMenuKbId(null); setEditing(kb); }}

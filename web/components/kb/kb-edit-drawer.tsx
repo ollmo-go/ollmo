@@ -6,9 +6,10 @@ import { toast } from "sonner";
 import { Drawer } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api, EmbeddingModel, KnowledgeBase, Paginated } from "@/lib/api";
+import { api, EmbeddingModel, KnowledgeBase, Paginated, ProviderCard } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { useConfirm } from "@/components/ui/confirm";
+import { ProviderModelSelect } from "@/components/ui/provider-model-select";
 
 type FormState = {
   id?: string;
@@ -47,6 +48,10 @@ export function KBEditDrawer({
     "embedding-list",
     () => api.listEmbeddings(1, 50)
   );
+  const { data: providerCards } = useSWR<ProviderCard[]>("providers", () =>
+    api.providers.list()
+  );
+  const providers = providerCards ?? [];
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [originalModelId, setOriginalModelId] = useState("");
@@ -68,20 +73,6 @@ export function KBEditDrawer({
     });
     setOriginalModelId(kb.embedding_model_id);
   }, [kb]);
-
-  // Active embedding providers as {id, model} options. When editing, always
-  // include the KB's current id even if its provider was deleted/deactivated
-  // so the dropdown shows a valid selection.
-  const modelOptions = useMemo(() => {
-    const items = (embedData?.items ?? [])
-      .filter((p) => p.status === "active")
-      .map((p) => ({ id: p.id, model: p.model }));
-    if (isEdit && form.embeddingModelId && !items.some((o) => o.id === form.embeddingModelId)) {
-      const cur = (embedData?.items ?? []).find((p) => p.id === form.embeddingModelId);
-      items.unshift({ id: form.embeddingModelId, model: cur?.model || form.embeddingModelId });
-    }
-    return items;
-  }, [embedData, isEdit, form.embeddingModelId]);
 
   // The tenant's default embedding provider's model name, shown in the hint
   // when "use tenant default" is selected.
@@ -172,21 +163,20 @@ export function KBEditDrawer({
         </div>
         <div className="space-y-1">
           <Label htmlFor="kb-model">{t("kb.embedding_model")}</Label>
-          <select
-            id="kb-model"
-            className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+          <ProviderModelSelect
+            models={embedData?.items ?? []}
+            providers={providers}
             value={form.embeddingModelId}
-            onChange={(e) => setForm({ ...form, embeddingModelId: e.target.value })}
-          >
-            <option value="">
-              {defaultEmbedModel
+            onChange={(v) => setForm({ ...form, embeddingModelId: v })}
+            defaultLabel={
+              defaultEmbedModel
                 ? `${t("kb.embedding_default")} (${defaultEmbedModel})`
-                : t("kb.embedding_none")}
-            </option>
-            {modelOptions.map((m) => (
-              <option key={m.id} value={m.id}>{m.model}</option>
-            ))}
-          </select>
+                : t("kb.embedding_none")
+            }
+            providerAllLabel={t("common.provider_all")}
+            otherLabel={t("common.provider_other")}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
           {!form.embeddingModelId && defaultEmbedModel && (
             <p className="text-xs text-muted-foreground">
               {t("kb.embedding_hint", { model: defaultEmbedModel })}

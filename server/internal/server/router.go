@@ -27,6 +27,7 @@ import (
 	"ollmo/ollmo/internal/memory"
 	"ollmo/ollmo/internal/middleware"
 	"ollmo/ollmo/internal/pipeline"
+	"ollmo/ollmo/internal/provider"
 	"ollmo/ollmo/internal/rerank"
 	"ollmo/ollmo/internal/search"
 	"ollmo/ollmo/internal/site"
@@ -156,6 +157,20 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	agentSvc := agent.NewService(agentRepo)
 	agentHandler := agent.NewHandler(agentSvc)
 
+	// Documents (nested under KB). Created early so the install wizard can
+	// seed a demo document; the route group below reuses this instance.
+	docRepo := doc.NewRepo(deps.DB)
+	embedResolver := embedding.NewResolver(embedRepo, nil)
+	// Redis relay: the worker publishes doc events to Redis; this goroutine
+	// feeds them to local SSE subscribers.
+	docEventBus := doc.NewEventBus().WithRedis(deps.Redis)
+	go docEventBus.RelayRedis(context.Background())
+	docSvc := doc.NewService(docRepo, kbRepo, deps.MinIO, deps.cfg.MinIO.Bucket, deps.Asynq, deps.Vector, embedResolver).
+		WithQuotaChecker(quotaChecker).
+		WithEventBus(docEventBus)
+	kbSvc.WithReembedder(docSvc)
+	docHandler := doc.NewHandler(docSvc)
+
 	// Invitation: user invitation flow.
 	invRepo := invitation.NewRepo(deps.DB)
 	invSvc := invitation.NewService(invRepo, userRepo)
@@ -164,11 +179,17 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	api := app.Group("/api/v1")
 
 	// Install routes (public, only work when system is uninitialized).
+	// Unified provider service so install seeds one provider card with all model kinds.
+	installCrypt := crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey)
 	installSvc := install.NewService(
 		deps.DB, userRepo, tenantRepo,
-		llm.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey)),
-		embedding.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey)),
-		rerank.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey)),
+		provider.NewService(
+			provider.NewRepo(deps.DB, installCrypt),
+			provider.NewLLMStore(llm.NewRepo(deps.DB, installCrypt)),
+			provider.NewEmbeddingStore(embedding.NewRepo(deps.DB, installCrypt)),
+			provider.NewRerankStore(rerank.NewRepo(deps.DB, installCrypt)),
+		),
+		kbSvc, agentSvc, docSvc,
 		deps.cfg.Auth.JWTSecret, deps.cfg.Auth.JWTExpireHours,
 	)
 	installHandler := install.NewHandler(installSvc)
@@ -385,18 +406,8 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	kbGrp.Get("/:kbId/agent", kbRead, agentHandler.Get)
 	kbGrp.Put("/:kbId/agent", kbWrite, agentHandler.Save)
 
-	// Documents (nested under KB).
-	docRepo := doc.NewRepo(deps.DB)
-	embedResolver := embedding.NewResolver(embedRepo, nil)
-	// Redis relay: the worker publishes doc events to Redis; this goroutine
-	// feeds them to local SSE subscribers.
-	docEventBus := doc.NewEventBus().WithRedis(deps.Redis)
-	go docEventBus.RelayRedis(context.Background())
-	docSvc := doc.NewService(docRepo, kbRepo, deps.MinIO, deps.cfg.MinIO.Bucket, deps.Asynq, deps.Vector, embedResolver).
-		WithQuotaChecker(quotaChecker).
-		WithEventBus(docEventBus)
-	kbSvc.WithReembedder(docSvc)
-	docHandler := doc.NewHandler(docSvc)
+	// Documents (nested under KB). The service instance is created above so
+	// the install wizard can reuse it for the demo document.
 	docGrp := kbGrp.Group("/:kbId/documents")
 	docGrp.Post("/", kbWrite, docHandler.Upload)
 	docGrp.Get("/", kbRead, docHandler.List)
@@ -462,6 +473,27 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	rerankGrp.Post("/", middleware.AdminOnly(), rerankHandler.Create)
 	rerankGrp.Put("/:id", middleware.AdminOnly(), rerankHandler.Update)
 	rerankGrp.Delete("/:id", middleware.AdminOnly(), rerankHandler.Delete)
+
+	// Unified providers management (方案B: 统一provider实体)
+	crypt := crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey)
+	providerSvc := provider.NewService(
+		provider.NewRepo(deps.DB, crypt),
+		provider.NewLLMStore(llmRepo),
+		provider.NewEmbeddingStore(embedRepo),
+		provider.NewRerankStore(rerankRepo),
+	)
+	providerHandler := provider.NewHandler(providerSvc)
+	providerGrp := protected.Group("/providers", middleware.AdminOnly())
+	providerGrp.Get("/", providerHandler.List)
+	providerGrp.Get("/catalog", providerHandler.Catalog)
+	providerGrp.Post("/", providerHandler.Create)
+	providerGrp.Put("/:id", providerHandler.Update)
+	providerGrp.Delete("/:id", providerHandler.Delete)
+	providerGrp.Post("/:id/discover", providerHandler.Discover)
+	providerGrp.Post("/probe", providerHandler.Probe)
+	providerGrp.Post("/:id/models/:kind", providerHandler.AddModel)
+	providerGrp.Put("/:id/models/:kind/:mid", providerHandler.UpdateModel)
+	providerGrp.Delete("/:id/models/:kind/:mid", providerHandler.RemoveModel)
 
 	// Search (retrieval).
 	graphSvc := graph.NewService(graph.NewRepo(deps.DB), deps.LLM)

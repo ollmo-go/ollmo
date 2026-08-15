@@ -74,6 +74,8 @@ func EmbeddingDim(model string) (int, error) {
 		return 1536, nil
 	case "text-embedding-3-large":
 		return 3072, nil
+	case "embedding-3": // Zhipu embedding-3 default output dim
+		return 2048, nil
 	default:
 		return 0, fmt.Errorf("unknown embedding model %q: add its dim to vector.EmbeddingDim", model)
 	}
