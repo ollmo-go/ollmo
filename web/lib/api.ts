@@ -1065,6 +1065,8 @@ export interface TraceStep {
   node_id?: string;
   node_type?: string;
   edge_id?: string;
+  status?: string;
+  duration_ms?: number;
   detail?: string;
 }
 

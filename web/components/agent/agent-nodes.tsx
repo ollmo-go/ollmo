@@ -10,7 +10,7 @@ import {
   useReactFlow,
   type EdgeProps,
 } from "reactflow";
-import { Search, Brain, MessageSquare, GitBranch, Split, Check, X } from "lucide-react";
+import { Search, Brain, MessageSquare, GitBranch, Split, Check, X, AlertCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { normalizeCategories } from "./agent-config-panel";
 
@@ -36,10 +36,15 @@ function nodeShell(
   subtitle: string,
   selected: boolean,
   accent: NodeAccent,
+  data: NodeData,
   onDelete?: () => void,
   hasTarget = true,
   hasSource = true
 ) {
+  // __runtime/__issues are injected at render time by the canvas page (trace
+  // badges and validation problems); they never reach the saved definition.
+  const runtime = data.__runtime as { status?: string; ms?: number } | undefined;
+  const issues = (data.__issues as string[] | undefined) ?? [];
   return (
     <div
       className={`relative rounded-lg border border-l-4 bg-card px-4 py-3 shadow-sm w-52 transition-colors ${
@@ -47,12 +52,26 @@ function nodeShell(
       }`}
       style={{ borderLeftColor: accent.color }}
     >
+      {issues.length > 0 && (
+        <span
+          title={issues.join("\n")}
+          className="absolute -top-2 -left-2 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-sm"
+        >
+          <AlertCircle className="h-2.5 w-2.5" />
+        </span>
+      )}
       {hasTarget && (
         <Handle type="target" position={Position.Left} className="!h-2 !w-2 !bg-muted-foreground" />
       )}
       <div className="flex items-center gap-2 mb-1">
         <span className={accent.icon}>{icon}</span>
         <span className="font-medium text-sm">{label}</span>
+        {runtime?.status === "ok" && (
+          <span className="ml-auto inline-flex items-center gap-0.5 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+            <Check className="h-2.5 w-2.5" />
+            {runtime.ms ? `${(runtime.ms / 1000).toFixed(1)}s` : ""}
+          </span>
+        )}
       </div>
       <div className="text-xs text-muted-foreground truncate">{subtitle}</div>
       {hasSource && (
@@ -89,6 +108,7 @@ export const RetrievalNode = memo(({ id, data, selected }: NodeCompProps) => {
     `top_k ${Number(data.top_k || 10)} · ${rerank} · ${graph}`,
     !!selected,
     accents.retrieval,
+    data,
     onDelete
   );
 });
@@ -104,6 +124,7 @@ export const LLMNode = memo(({ id, data, selected }: NodeCompProps) => {
     `temp ${temp} · max_tokens ${maxTok}`,
     !!selected,
     accents.llm,
+    data,
     onDelete
   );
 });
@@ -118,6 +139,7 @@ export const MessageNode = memo(({ id, data, selected }: NodeCompProps) => {
     text ? text.slice(0, 40) : t("agent.node_message_default"),
     !!selected,
     accents.message,
+    data,
     onDelete
   );
 });
@@ -142,6 +164,7 @@ export const ConditionNode = memo(({ id, data, selected }: NodeCompProps) => {
     `${varName} ${op === "contains" ? t("agent.op_contains") : op} ${val}`,
     !!selected,
     accents.condition,
+    data,
     onDelete
   );
 });
@@ -156,6 +179,7 @@ export const ClassifierNode = memo(({ id, data, selected }: NodeCompProps) => {
     names.length > 0 ? names.join(" / ") : t("agent.node_classifier_default"),
     !!selected,
     accents.classifier,
+    data,
     onDelete
   );
 });

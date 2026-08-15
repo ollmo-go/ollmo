@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Play, Save, Send, Square, X, Plus, Search, Brain, MessageSquare, GitBranch, Split } from "lucide-react";
+import { ArrowLeft, Play, Save, Send, Square, X, Plus, Search, Brain, MessageSquare, GitBranch, Split, LayoutGrid } from "lucide-react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -17,8 +17,10 @@ import ReactFlow, {
   updateEdge,
   useEdgesState,
   useNodesState,
+  useReactFlow,
 } from "reactflow";
 import useSWR from "swr";
+import dagre from "dagre";
 import "reactflow/dist/style.css";
 
 import { api, AgentDefinition, AgentEdge, AgentNode, Citation, Message, ReplyStats, TraceStep } from "@/lib/api";
@@ -360,6 +362,54 @@ const DEFAULT_NODE_DATA: Record<string, Record<string, unknown>> = {
   classifier: { categories: [], llm_model_id: "" },
 };
 
+// Node card metrics for dagre: width w-52 = 208px, content height ~76px.
+const NODE_W = 208;
+const NODE_H = 76;
+
+// layoutNodes re-positions nodes with dagre (left-to-right layered layout)
+// so hand-built graphs and freshly added nodes stay tidy.
+function layoutNodes(nodes: Node[], edges: Edge[]): Node[] {
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: "LR", nodesep: 50, ranksep: 110, marginx: 40, marginy: 40 });
+  g.setDefaultEdgeLabel(() => ({}));
+  nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
+  edges.forEach((e) => g.setEdge(e.source, e.target));
+  dagre.layout(g);
+  return nodes.map((n) => {
+    const pos = g.node(n.id) as { x: number; y: number };
+    return { ...n, position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 } };
+  });
+}
+
+// validateGraph returns per-node problems shown as red badges on the canvas.
+// Save still succeeds (with a warning); running the agent is blocked instead.
+function validateGraph(
+  nodes: Node[],
+  edges: Edge[],
+  t: (key: string) => string
+): Record<string, string[]> {
+  const issues: Record<string, string[]> = {};
+  const push = (id: string, msg: string) => {
+    (issues[id] ||= []).push(msg);
+  };
+  const connected = new Set<string>();
+  edges.forEach((e) => {
+    connected.add(e.source);
+    connected.add(e.target);
+  });
+  for (const n of nodes) {
+    if (!connected.has(n.id)) push(n.id, t("agent.issue_disconnected"));
+    const d = n.data as Record<string, unknown>;
+    if (n.type === "llm" && !String(d.system_prompt ?? "").trim()) push(n.id, t("agent.issue_no_prompt"));
+    if (n.type === "message" && !String(d.text ?? "").trim()) push(n.id, t("agent.issue_no_text"));
+    if (n.type === "condition" && !String(d.value ?? "").trim()) push(n.id, t("agent.issue_no_value"));
+    if (n.type === "classifier" && normalizeCategories(d.categories).length === 0) {
+      push(n.id, t("agent.issue_no_categories"));
+    }
+  }
+  return issues;
+}
+
 function AgentCanvas() {
   const params = useParams<{ id: string }>();
   const kbId = params.id;
@@ -369,6 +419,7 @@ function AgentCanvas() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const { fitView } = useReactFlow();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -380,6 +431,8 @@ function AgentCanvas() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [traceNodes, setTraceNodes] = useState<Set<string>>(new Set());
   const [traceEdges, setTraceEdges] = useState<Set<string>>(new Set());
+  // node_id -> { status, ms } runtime badge filled in from trace steps.
+  const [nodeRuntime, setNodeRuntime] = useState<Record<string, { status: string; ms: number }>>({});
 
   useEffect(() => {
     if (!agent || loaded) return;
@@ -498,19 +551,22 @@ function AgentCanvas() {
     setPaletteOpen(false);
   }
 
-  // applyTemplate replaces the canvas with a predefined node layout.
+  // applyTemplate replaces the canvas with a predefined graph; positions are
+  // assigned by dagre so both templates render already tidied up.
   // minimal: retrieval → llm (2 nodes).
   // standard: classifier → retrieval → condition → llm/message (5 nodes).
   function applyTemplate(template: "minimal" | "standard") {
     const now = Date.now();
+    let templateNodes: Node[];
+    let templateEdges: Edge[];
     if (template === "minimal") {
       const rId = `n${now}`;
       const lId = `n${now + 1}`;
-      setNodes([
-        { id: rId, type: "retrieval", position: { x: 80, y: 200 }, data: { ...DEFAULT_NODE_DATA.retrieval, slug: "retrieval_1" } },
-        { id: lId, type: "llm", position: { x: 400, y: 200 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_1" } },
-      ]);
-      setEdges([{ id: `e-${rId}-${lId}`, source: rId, target: lId }]);
+      templateNodes = [
+        { id: rId, type: "retrieval", position: { x: 0, y: 0 }, data: { ...DEFAULT_NODE_DATA.retrieval, slug: "retrieval_1" } },
+        { id: lId, type: "llm", position: { x: 0, y: 0 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_1" } },
+      ];
+      templateEdges = [{ id: `e-${rId}-${lId}`, source: rId, target: lId }];
     } else {
       // Teaching template: every node type plays to its strength.
       //   classifier → intent routing (doc Q&A vs chitchat — judgeable from
@@ -526,40 +582,46 @@ function AgentCanvas() {
       const lId = `n${now + 3}`;
       const mId = `n${now + 4}`;
       const l2Id = `n${now + 5}`;
-      setNodes([
-        { id: cId, type: "classifier", position: { x: 40, y: 180 }, data: { ...DEFAULT_NODE_DATA.classifier, slug: "classifier_1", categories: [
+      templateNodes = [
+        { id: cId, type: "classifier", position: { x: 0, y: 0 }, data: { ...DEFAULT_NODE_DATA.classifier, slug: "classifier_1", categories: [
           { name: t("agent.cat_kb"), description: t("agent.cat_kb_desc") },
           { name: t("agent.cat_chat"), description: t("agent.cat_chat_desc") },
         ] } },
-        { id: rId, type: "retrieval", position: { x: 320, y: 60 }, data: { ...DEFAULT_NODE_DATA.retrieval, slug: "retrieval_1" } },
-        { id: cdId, type: "condition", position: { x: 600, y: 60 }, data: { ...DEFAULT_NODE_DATA.condition, variable: "retrieval_1.top_score", operator: ">", value: "0.35" } },
-        { id: lId, type: "llm", position: { x: 880, y: 0 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_1", system_prompt: t("agent.template_rag_prompt") } },
-        { id: mId, type: "message", position: { x: 880, y: 240 }, data: { ...DEFAULT_NODE_DATA.message, slug: "message_1", text: t("agent.template_default_fallback") } },
-        { id: l2Id, type: "llm", position: { x: 320, y: 340 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_2" } },
-      ]);
-      setEdges([
+        { id: rId, type: "retrieval", position: { x: 0, y: 0 }, data: { ...DEFAULT_NODE_DATA.retrieval, slug: "retrieval_1" } },
+        { id: cdId, type: "condition", position: { x: 0, y: 0 }, data: { ...DEFAULT_NODE_DATA.condition, variable: "retrieval_1.top_score", operator: ">", value: "0.35" } },
+        { id: lId, type: "llm", position: { x: 0, y: 0 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_1", system_prompt: t("agent.template_rag_prompt") } },
+        { id: mId, type: "message", position: { x: 0, y: 0 }, data: { ...DEFAULT_NODE_DATA.message, slug: "message_1", text: t("agent.template_default_fallback") } },
+        { id: l2Id, type: "llm", position: { x: 0, y: 0 }, data: { ...DEFAULT_NODE_DATA.llm, slug: "llm_2" } },
+      ];
+      templateEdges = [
         { id: `e-${cId}-${rId}`, source: cId, target: rId, label: t("agent.cat_kb") },
         { id: `e-${cId}-${l2Id}`, source: cId, target: l2Id, label: t("agent.cat_chat") },
         { id: `e-${rId}-${cdId}`, source: rId, target: cdId },
         { id: `e-${cdId}-${lId}`, source: cdId, target: lId, label: t("agent.branch_true") },
         { id: `e-${cdId}-${mId}`, source: cdId, target: mId, label: t("agent.branch_false") },
-      ]);
+      ];
     }
+    setNodes(layoutNodes(templateNodes, templateEdges));
+    setEdges(templateEdges);
     setSelectedId(null);
     setSelectedEdgeId(null);
     setTraceNodes(new Set());
     setTraceEdges(new Set());
+    setNodeRuntime({});
     setOpeningMessage(t("agent.template_opening_message"));
     setDirty(true);
+    setTimeout(() => fitView({ padding: 0.2 }), 60);
   }
 
   async function save(): Promise<boolean> {
     setSaving(true);
+    const issueCount = Object.keys(issues).length;
     try {
       await api.saveAgent(kbId, fromFlow(nodes, edges, openingMessage, suggestedQuestions));
       mutate();
       setDirty(false);
-      toast.success(t("toast.saved"));
+      if (issueCount > 0) toast.warning(t("agent.validate_warn", { count: issueCount }));
+      else toast.success(t("toast.saved"));
       return true;
     } catch (e) {
       toast.error((e as Error).message);
@@ -571,7 +633,13 @@ function AgentCanvas() {
 
   // Run opens the chat drawer for quick testing. Persist first only when the
   // canvas has unsaved config changes so an untouched agent doesn't toast.
+  // Config problems block the run so test results are meaningful.
   async function run() {
+    const issueCount = Object.keys(issues).length;
+    if (issueCount > 0) {
+      toast.error(t("agent.validate_block", { count: issueCount }));
+      return;
+    }
     if (dirty) {
       const ok = await save();
       if (!ok) return;
@@ -579,14 +647,33 @@ function AgentCanvas() {
     setRunOpen(true);
   }
 
-  // Derive display nodes/edges with trace highlight applied.
+  // Validation problems recomputed live as nodes/edges change.
+  const issues = useMemo(() => validateGraph(nodes, edges, t), [nodes, edges, t]);
+
+  // Derive display nodes/edges with trace highlight, runtime badges, and
+  // validation problems applied. Extras live only on the rendered copies so
+  // the underlying nodes state stays save-clean.
   const displayNodes = useMemo(() => {
-    if (traceNodes.size === 0) return nodes;
+    const hasExtras =
+      traceNodes.size > 0 || Object.keys(nodeRuntime).length > 0 || Object.keys(issues).length > 0;
+    if (!hasExtras) return nodes;
     return nodes.map((n) => ({
       ...n,
       className: traceNodes.has(n.id) ? "agent-trace-active" : undefined,
+      data: {
+        ...n.data,
+        __runtime: nodeRuntime[n.id],
+        __issues: issues[n.id],
+      },
     }));
-  }, [nodes, traceNodes]);
+  }, [nodes, traceNodes, nodeRuntime, issues]);
+
+  // autoLayout re-arranges the canvas with dagre and frames the result.
+  const autoLayout = useCallback(() => {
+    setNodes((nds) => layoutNodes(nds, edges));
+    setDirty(true);
+    setTimeout(() => fitView({ padding: 0.2 }), 60);
+  }, [edges, setNodes, fitView]);
 
   const displayEdges = useMemo(() => {
     if (traceEdges.size === 0) return edges;
@@ -640,6 +727,15 @@ function AgentCanvas() {
                 >
                   <Plus className="h-3.5 w-3.5 mr-1" />
                   {t("agent.add_node")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={autoLayout}
+                  disabled={nodes.length === 0}
+                >
+                  <LayoutGrid className="h-3.5 w-3.5 mr-1" />
+                  {t("agent.auto_layout")}
                 </Button>
                 {paletteOpen && (
                   <div className="absolute top-full left-3 mt-1 z-10 rounded-md border border-border bg-popover shadow-md py-1 w-40">
@@ -740,11 +836,21 @@ function AgentCanvas() {
         setRunOpen(false);
         setTraceNodes(new Set());
         setTraceEdges(new Set());
+        setNodeRuntime({});
       }} onSendStart={() => {
         setTraceNodes(new Set());
         setTraceEdges(new Set());
+        setNodeRuntime({});
       }} onTraceStep={(step) => {
-        if (step.node_id) setTraceNodes((prev) => new Set(prev).add(step.node_id!));
+        if (step.node_id) {
+          setTraceNodes((prev) => new Set(prev).add(step.node_id!));
+          if (step.status) {
+            setNodeRuntime((prev) => ({
+              ...prev,
+              [step.node_id!]: { status: step.status!, ms: step.duration_ms ?? 0 },
+            }));
+          }
+        }
         if (step.edge_id) setTraceEdges((prev) => new Set(prev).add(step.edge_id!));
       }} />}
     </div>

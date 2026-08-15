@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"ollmo/ollmo/pkg/clients"
 )
@@ -103,7 +104,11 @@ type TraceStep struct {
 	NodeID   string `json:"node_id"`
 	NodeType string `json:"node_type"`
 	EdgeID   string `json:"edge_id,omitempty"`
-	Detail   string `json:"detail,omitempty"`
+	// Status is "ok" for now; reserved for "error" once node failures can
+	// abort the walk. DurationMs measures the node's own execution time.
+	Status     string `json:"status,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 // Terminal describes where the graph walk ended:
@@ -183,8 +188,9 @@ func Execute(
 
 		switch node.Type {
 		case NodeRetrieval:
+			start := time.Now()
 			execRetrieval(ctx, deps, tenantID, kbID, node, ec, emit)
-			ts := TraceStep{NodeID: id, NodeType: node.Type, Detail: fmt.Sprintf("hits=%d", ec.HitCount)}
+			ts := TraceStep{NodeID: id, NodeType: node.Type, Status: "ok", DurationMs: time.Since(start).Milliseconds(), Detail: fmt.Sprintf("hits=%d", ec.HitCount)}
 			trace = append(trace, ts)
 			emit(ExecutionEvent{Phase: EvTrace, Trace: &ts})
 			if next, edgeID := firstTargetWithEdge(out[id]); next != "" {
@@ -209,8 +215,9 @@ func Execute(
 			}
 
 		case NodeCondition:
+			start := time.Now()
 			next, detail := execConditionWithDetail(node, ec, out[id])
-			ts := TraceStep{NodeID: id, NodeType: node.Type, Detail: detail}
+			ts := TraceStep{NodeID: id, NodeType: node.Type, Status: "ok", DurationMs: time.Since(start).Milliseconds(), Detail: detail}
 			trace = append(trace, ts)
 			emit(ExecutionEvent{Phase: EvTrace, Trace: &ts})
 			if next != "" {
@@ -228,8 +235,9 @@ func Execute(
 			// and keep walking. A dangling LLM node is the terminal: return
 			// its config for the streaming reply.
 			if len(out[id]) > 0 {
+				start := time.Now()
 				detail := execIntermediateLLM(ctx, deps, tenantID, node, ec)
-				ts := TraceStep{NodeID: id, NodeType: node.Type, Detail: detail}
+				ts := TraceStep{NodeID: id, NodeType: node.Type, Status: "ok", DurationMs: time.Since(start).Milliseconds(), Detail: detail}
 				trace = append(trace, ts)
 				emit(ExecutionEvent{Phase: EvTrace, Trace: &ts})
 				if next, edgeID := firstTargetWithEdge(out[id]); next != "" {
@@ -241,7 +249,7 @@ func Execute(
 			} else {
 				cfg := ExecutionConfigFromNode(node, ec)
 				cfg.SystemPrompt = renderTerminalPrompt(nodeString(node.Data, "system_prompt", ""), ec)
-				ts := TraceStep{NodeID: id, NodeType: node.Type}
+				ts := TraceStep{NodeID: id, NodeType: node.Type, Status: "ok"}
 				trace = append(trace, ts)
 				emit(ExecutionEvent{Phase: EvTrace, Trace: &ts})
 				return Terminal{Type: NodeLLM, LLMCfg: &cfg, Trace: trace}
@@ -250,7 +258,7 @@ func Execute(
 		case NodeMessage:
 			ec.DirectReply = renderVars(nodeString(node.Data, "text", ""), ec.Vars)
 			ec.DirectCitations = nil
-			ts := TraceStep{NodeID: id, NodeType: node.Type}
+			ts := TraceStep{NodeID: id, NodeType: node.Type, Status: "ok"}
 			trace = append(trace, ts)
 			emit(ExecutionEvent{Phase: EvTrace, Trace: &ts})
 			return Terminal{Type: NodeMessage, Trace: trace}
