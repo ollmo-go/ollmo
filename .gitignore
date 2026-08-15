@@ -13,6 +13,7 @@ server/bin/
 server/tmp/
 server/ollmo
 server/ollmo.exe
+server/.gocache/
 *.exe
 *.test
 *.out
