@@ -20,6 +20,7 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const t = useTranslations();
   const siteName = useSiteName();
+  const year = new Date().getFullYear();
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Apply the logged-in user's stored language preference.
@@ -75,6 +76,19 @@ export default function DashboardLayout({
         </header>
 
         <main className="flex-1 p-4 md:p-6 min-w-0">{children}</main>
+
+        <footer className="shrink-0 border-t px-4 py-3 text-center text-xs text-muted-foreground">
+          <span>{t("footer_copyright", { year })}</span>
+          <span className="mx-2">·</span>
+          <a
+            href="https://ollmo.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="transition-colors hover:text-foreground"
+          >
+            {t("footer_site")}
+          </a>
+        </footer>
       </div>
     </div>
   );

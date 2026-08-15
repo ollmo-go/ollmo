@@ -9,6 +9,7 @@ import (
 
 	"ollmo/ollmo/internal/agent"
 	"ollmo/ollmo/internal/annotation"
+	"ollmo/ollmo/internal/bill"
 	"ollmo/ollmo/internal/execution"
 	"ollmo/ollmo/internal/llm"
 	"ollmo/ollmo/internal/search"
@@ -72,6 +73,7 @@ type Service struct {
 	msgQuota  MessageQuotaChecker
 	annMatch  AnnotationMatcher
 	execRepo  *execution.Repo
+	billSvc   *bill.Service
 	hub       *Hub
 }
 
@@ -97,6 +99,21 @@ func (s *Service) WithAnnotations(m AnnotationMatcher) *Service {
 func (s *Service) WithExecutionRepo(r *execution.Repo) *Service {
 	s.execRepo = r
 	return s
+}
+
+// WithBill wires the usage/cost recorder. When set, every LLM invocation in
+// the chat flow (main reply, classifier, intermediate nodes, follow-ups) is
+// charged to the calling user via a bill row. Absent, billing is a no-op.
+func (s *Service) WithBill(b *bill.Service) *Service {
+	s.billSvc = b
+	return s
+}
+
+// recordUsage charges one model call to the user. billSvc is nil-safe, so
+// the whole billing layer is optional and can be turned off without touching
+// the chat flow.
+func (s *Service) recordUsage(tenantID, userID, convID, kbID, source string, model *llm.LLMModel, usage *clients.TokenUsage) {
+	s.billSvc.RecordUsage(tenantID, userID, kbID, convID, source, model, usage)
 }
 
 // WithAgentConfig wires the agent config fetcher. When set, each Stream call

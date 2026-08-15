@@ -16,6 +16,7 @@
     "app_name": "ollmo",
     "profile": "Profile",
     "analytics": "Analytics",
+    "usage": "Usage & Cost",
     "audit": "Audit Log",
     "admin": "Admin Console",
     "back_to_chat": "Back to Chat",
@@ -804,6 +805,29 @@
     "all_actions": "All actions",
     "empty": "No audit logs"
   },
+  "bill": {
+    "title": "Usage & Cost",
+    "subtitle": "Token usage recorded per LLM call, with cost estimated from each model's price",
+    "total_tokens": "Total Tokens",
+    "prompt_tokens": "Prompt Tokens",
+    "completion_tokens": "Completion Tokens",
+    "amount": "Estimated Cost",
+    "call_count": "Calls",
+    "per_user": "By User",
+    "per_model": "By Model",
+    "user": "User",
+    "model": "Model",
+    "source": "Source",
+    "time": "Time",
+    "recent_records": "Recent Calls",
+    "empty": "No calls recorded yet",
+    "estimate_hint": "Cost is an estimate computed from each model's input/output price (yuan per 1M tokens); models without a configured price are free.",
+    "source_chat": "Chat",
+    "source_classifier": "Classifier",
+    "source_intermediate": "Intermediate",
+    "source_followups": "Follow-ups",
+    "system_user": "(system)"
+  },
   "backup": {
     "title": "Import/Export",
     "export": "Export KB",
@@ -813,6 +837,8 @@
     "imported": "Imported {count} documents",
     "exported": "Exported"
   },
+  "footer_copyright": "© {year} Ollmo. All rights reserved",
+  "footer_site": "Visit Ollmo Website",
   "conv": {
     "rename": "Rename",
     "pin": "Pin",

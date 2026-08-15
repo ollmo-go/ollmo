@@ -81,7 +81,7 @@ func DebugNode(ctx context.Context, deps ExecutionDeps, tenantID, kbID string, n
 			"你是一个问题分类器。请将用户的问题分类到以下类别之一，只输出类别名称，不要输出其他内容。\n\n类别：\n%s\n\n用户问题：%s",
 			strings.Join(lines, "\n"), query,
 		)
-		resp, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{Model: model, Messages: []clients.ChatMessage{{Role: "user", Content: prompt}}})
+		resp, _, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{Model: model, Messages: []clients.ChatMessage{{Role: "user", Content: prompt}}})
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +119,7 @@ func DebugNode(ctx context.Context, deps ExecutionDeps, tenantID, kbID string, n
 		if err != nil {
 			return nil, err
 		}
-		resp, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{
+		resp, _, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{
 			Model: model,
 			Messages: []clients.ChatMessage{
 				{Role: "system", Content: renderVars(nodeString(node.Data, "system_prompt", ""), ec.Vars)},

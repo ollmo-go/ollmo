@@ -16,8 +16,8 @@ func fakeDeps(contextText, llmReply string) ExecutionDeps {
 		ResolveLLM: func(ctx context.Context, tenantID, modelID string) (string, string, string, error) {
 			return "http://llm", "test-model", "key", nil
 		},
-		ChatComplete: func(ctx context.Context, endpoint, apiKey string, req clients.ChatRequest) (string, error) {
-			return llmReply, nil
+		ChatComplete: func(ctx context.Context, endpoint, apiKey string, req clients.ChatRequest) (string, *clients.TokenUsage, error) {
+			return llmReply, nil, nil
 		},
 	}
 }
@@ -332,13 +332,13 @@ func TestNodeCategories(t *testing.T) {
 func TestClassifierUsesDescriptions(t *testing.T) {
 	var gotPrompt string
 	deps := fakeDeps("ctx", "知识库问题")
-	deps.ChatComplete = func(ctx context.Context, endpoint, apiKey string, req clients.ChatRequest) (string, error) {
+	deps.ChatComplete = func(ctx context.Context, endpoint, apiKey string, req clients.ChatRequest) (string, *clients.TokenUsage, error) {
 		for _, m := range req.Messages {
 			if m.Role == "user" {
 				gotPrompt = m.Content
 			}
 		}
-		return "知识库问题", nil
+		return "知识库问题", nil, nil
 	}
 	def := &Definition{
 		Nodes: []Node{

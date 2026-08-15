@@ -25,6 +25,22 @@ export function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+/** Format a token count with thousands separators. */
+export function formatTokens(n?: number): string {
+  if (!n) return "0";
+  return n.toLocaleString();
+}
+
+/** Format an estimated cost in yuan. Small amounts keep 4 decimals so per-call
+ *  charges (often fractions of a cent) remain visible. */
+export function formatCost(n?: number): string {
+  const v = n ?? 0;
+  if (v >= 100) return `¥${v.toFixed(0)}`;
+  if (v >= 1) return `¥${v.toFixed(2)}`;
+  if (v > 0) return `¥${v.toFixed(4)}`;
+  return "¥0";
+}
+
 /** Format a millisecond duration as a compact label. */
 export function formatMs(ms?: number): string {
   if (!ms || ms <= 0) return "0ms";

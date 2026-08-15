@@ -249,7 +249,7 @@ Text:
 		Temperature: 0,
 		MaxTokens:   1024,
 	}
-	raw, err := s.llm.Chat(ctx, endpoint, apiKey, req)
+	raw, _, err := s.llm.Chat(ctx, endpoint, apiKey, req)
 	if err != nil {
 		return nil, fmt.Errorf("llm extract: %w", err)
 	}

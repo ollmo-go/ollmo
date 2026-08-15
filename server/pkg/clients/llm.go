@@ -83,13 +83,14 @@ type chatResponse struct {
 }
 
 // Chat does a non-streaming completion. Used for connection tests and for
-// non-interactive summaries.
-func (c *LLMClient) Chat(ctx context.Context, endpoint, apiKey string, req ChatRequest) (string, error) {
+// non-interactive summaries. Returns the assistant content plus the
+// provider-reported token usage (nil when the provider omits it).
+func (c *LLMClient) Chat(ctx context.Context, endpoint, apiKey string, req ChatRequest) (string, *TokenUsage, error) {
 	req.Stream = false
 	body, _ := json.Marshal(req)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if apiKey != "" {
@@ -98,28 +99,28 @@ func (c *LLMClient) Chat(ctx context.Context, endpoint, apiKey string, req ChatR
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("llm request: %w", err)
+		return "", nil, fmt.Errorf("llm request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	rawBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("llm http %d: %s", resp.StatusCode, Snippet(rawBody))
+		return "", nil, fmt.Errorf("llm http %d: %s", resp.StatusCode, Snippet(rawBody))
 	}
 
 	log.Printf("[llm] response from %s model=%s status=%d body=%s", endpoint, req.Model, resp.StatusCode, string(rawBody))
 
 	var out chatResponse
 	if err := json.Unmarshal(rawBody, &out); err != nil {
-		return "", fmt.Errorf("decode llm response: %w (raw: %s)", err, Snippet(rawBody))
+		return "", nil, fmt.Errorf("decode llm response: %w (raw: %s)", err, Snippet(rawBody))
 	}
 	if out.Error != nil {
-		return "", fmt.Errorf("llm error: %s", out.Error.Message)
+		return "", nil, fmt.Errorf("llm error: %s", out.Error.Message)
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("llm returned no choices (raw: %s)", Snippet(rawBody))
+		return "", nil, fmt.Errorf("llm returned no choices (raw: %s)", Snippet(rawBody))
 	}
-	return out.Choices[0].Message.Content, nil
+	return out.Choices[0].Message.Content, out.Usage, nil
 }
 
 // ChatStreamDelta is one token-sized chunk emitted by ChatStream. When Done

@@ -130,9 +130,9 @@ func (s *Service) ProbeModel(ctx context.Context, tenantID string, in ProbeModel
 	}
 	switch in.Kind {
 	case modelcatalog.KindChat, "llm":
-		out, err := clients.NewLLM().Chat(ctx, in.Endpoint, in.APIKey, clients.ChatRequest{
-			Model:    in.Model,
-			Messages: []clients.ChatMessage{{Role: "user", Content: "Reply with the single word: ok"}},
+		out, _, err := clients.NewLLM().Chat(ctx, in.Endpoint, in.APIKey, clients.ChatRequest{
+			Model:     in.Model,
+			Messages:  []clients.ChatMessage{{Role: "user", Content: "Reply with the single word: ok"}},
 			MaxTokens: 32,
 		})
 		if err != nil {

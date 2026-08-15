@@ -9,6 +9,7 @@ import (
 	"ollmo/ollmo/internal/annotation"
 	"ollmo/ollmo/internal/apikey"
 	"ollmo/ollmo/internal/audit"
+	"ollmo/ollmo/internal/bill"
 	"ollmo/ollmo/internal/chat"
 	"ollmo/ollmo/internal/config"
 	"ollmo/ollmo/internal/doc"
@@ -61,6 +62,7 @@ func RunMigrate(cfg *config.Config) error {
 		&invitation.Invitation{},
 		&audit.AuditLog{},
 		&site.Setting{},
+		&bill.Record{},
 	); err != nil {
 		return fmt.Errorf("auto-migrate: %w", err)
 	}

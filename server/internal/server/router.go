@@ -15,6 +15,7 @@ import (
 	"ollmo/ollmo/internal/audit"
 	"ollmo/ollmo/internal/auth"
 	"ollmo/ollmo/internal/backup"
+	"ollmo/ollmo/internal/bill"
 	"ollmo/ollmo/internal/chat"
 	"ollmo/ollmo/internal/doc"
 	"ollmo/ollmo/internal/embedding"
@@ -515,6 +516,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	protected.Get("/executions/:id", executionHandler.Get)
 
 	// Chat: conversations and messages with SSE streaming.
+	billSvc := bill.NewService(bill.NewRepo(deps.DB))
 	memorySvc := memory.NewService(memory.NewRepo(deps.DB), chat.NewRepo(deps.DB), llmRepo, deps.LLM).
 		WithAsynq(deps.Asynq)
 	memoryHandler := memory.NewHandler(memorySvc)
@@ -553,7 +555,8 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 		}).
 		WithMessageQuota(quotaChecker).
 		WithAnnotations(annSvc).
-		WithExecutionRepo(executionRepo)
+		WithExecutionRepo(executionRepo).
+		WithBill(billSvc)
 	chatHandler := chat.NewHandler(chatSvc)
 	protected.Post("/knowledge-bases/:kbId/conversations", kbRead, chatHandler.Create)
 	protected.Get("/conversations", chatHandler.List)
@@ -609,6 +612,15 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	analyticsGrp.Get("/usage", analyticsHandler.KBUsage)
 	analyticsGrp.Get("/activity", analyticsHandler.RecentActivity)
 	analyticsGrp.Get("/feedback", analyticsHandler.Feedback)
+
+	// Usage & cost (bill rows written per LLM call). All tenant members can
+	// view their tenant's token consumption.
+	billHandler := bill.NewHandler(billSvc)
+	billGrp := protected.Group("/bills")
+	billGrp.Get("/overview", billHandler.Overview)
+	billGrp.Get("/users", billHandler.Users)
+	billGrp.Get("/models", billHandler.Models)
+	billGrp.Get("/records", billHandler.Records)
 
 	// Audit logging (admin only).
 	auditHandler := audit.NewHandler(auditSvc)

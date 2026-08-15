@@ -12,12 +12,23 @@ import (
 
 	"ollmo/ollmo/internal/agent"
 	"ollmo/ollmo/internal/annotation"
+	"ollmo/ollmo/internal/bill"
 	"ollmo/ollmo/internal/execution"
 	"ollmo/ollmo/internal/llm"
 	"ollmo/ollmo/internal/search"
 	"ollmo/ollmo/pkg/clients"
 	"ollmo/ollmo/pkg/errs"
+	"ollmo/ollmo/pkg/tokener"
 )
+
+// chatUsage estimates token counts from raw prompt/completion text for
+// providers that omit the usage field. The CJK-aware estimator is
+// deliberately conservative; cost figures stay estimates regardless.
+func chatUsage(prompt, completion string) *clients.TokenUsage {
+	p := tokener.Estimate(prompt)
+	c := tokener.Estimate(completion)
+	return &clients.TokenUsage{PromptTokens: p, CompletionTokens: c, TotalTokens: p + c}
+}
 
 // Context-budget knobs. The prompt must fit the provider's window before it
 // is sent; otherwise the request fails provider-side with an opaque error.
@@ -48,8 +59,9 @@ func promptBudget(p *llm.LLMModel) int {
 
 // graphDeps builds the ExecutionDeps for the graph executor from the chat
 // service's wired collaborators. Called once per stream; the closures capture
-// tenantID/kbID/query from the surrounding scope.
-func (s *Service) graphDeps(tenantID, kbID, query string, trackHits bool) agent.ExecutionDeps {
+// tenantID/userID/kbID/convID/query from the surrounding scope. ChargeLLM
+// bills classifier/intermediate node calls back to the conversation owner.
+func (s *Service) graphDeps(tenantID, userID, kbID, convID, query string, trackHits bool) agent.ExecutionDeps {
 	return agent.ExecutionDeps{
 		Search: func(ctx context.Context, tid, kid, q string, topK int, rerank bool, rerankModelID string, useGraph bool) (string, int, float64, string, []any, error) {
 			r, err := s.searchSvc.Search(ctx, tid, kid, search.SearchRequest{
@@ -77,13 +89,23 @@ func (s *Service) graphDeps(tenantID, kbID, query string, trackHits bool) agent.
 			return p.Endpoint, p.Model, p.APIKey, nil
 		},
 		ChatComplete: s.llm.Chat,
+		ChargeLLM: func(modelID, source string, usage *clients.TokenUsage) {
+			if modelID == "" {
+				return
+			}
+			m, err := s.llmRepo.FindByID(tenantID, modelID)
+			if err != nil {
+				return
+			}
+			s.recordUsage(tenantID, userID, convID, kbID, source, m, usage)
+		},
 	}
 }
 
 // DebugAgentNode runs one agent node in isolation for the canvas "test this
 // node" action. Nothing is persisted.
 func (s *Service) DebugAgentNode(ctx context.Context, tenantID, kbID string, node agent.Node, query string) (*agent.NodeDebugResult, error) {
-	deps := s.graphDeps(tenantID, kbID, query, false)
+	deps := s.graphDeps(tenantID, "", kbID, "", query, false)
 	return agent.DebugNode(ctx, deps, tenantID, kbID, node, query)
 }
 
@@ -273,7 +295,7 @@ func (s *Service) runStream(
 	totalMs := int(time.Since(totalStart).Milliseconds())
 
 	if streamErr != "" || cancelled {
-		s.saveAssistant(tenantID, conv.ID, content, cits, nil, reasoning)
+		s.saveAssistant(tenantID, conv.ID, content, cits, nil, reasoning, false)
 		return
 	}
 	stats := &ReplyStats{
@@ -286,10 +308,11 @@ func (s *Service) runStream(
 		stats.CompletionTokens = usage.CompletionTokens
 		stats.TotalTokens = usage.TotalTokens
 	}
-	assistantID := s.saveAssistant(tenantID, conv.ID, content, cits, stats, reasoning)
+	s.recordUsage(tenantID, conv.OwnerID, conv.ID, conv.KbID, bill.SourceChat, provider, usage)
+	assistantID := s.saveAssistant(tenantID, conv.ID, content, cits, stats, reasoning, false)
 	s.triggerAutoMemory(tenantID, conv.ID)
 	send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: stats})
-	s.emitFollowUps(ctx, provider, tenantID, conv.ID, assistantID, query, content, out)
+	s.emitFollowUps(ctx, provider, tenantID, conv.OwnerID, conv.ID, conv.KbID, assistantID, query, content, out)
 	if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
 		log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
 	}
@@ -302,12 +325,12 @@ func (s *Service) replyAnnotation(ctx context.Context, tenantID string, conv *Co
 	answer := m.Annotation.Answer
 	stats := &ReplyStats{TotalMs: int(time.Since(start).Milliseconds())}
 	if !send(ctx, out, StreamReply{Phase: PhaseGenerate, Token: answer, Annotation: true}) {
-		s.saveAssistant(tenantID, conv.ID, answer, nil, nil, "")
+		s.saveAssistant(tenantID, conv.ID, answer, nil, nil, "", true)
 		return
 	}
-	assistantID := s.saveAssistant(tenantID, conv.ID, answer, nil, stats, "")
+	assistantID := s.saveAssistant(tenantID, conv.ID, answer, nil, stats, "", true)
 	send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: stats, Annotation: true})
-	s.emitFollowUps(ctx, provider, tenantID, conv.ID, assistantID, query, answer, out)
+	s.emitFollowUps(ctx, provider, tenantID, conv.OwnerID, conv.ID, conv.KbID, assistantID, query, answer, out)
 	if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
 		log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
 	}
@@ -361,8 +384,9 @@ func parseFollowUps(raw string) []string {
 
 // generateFollowUps asks the LLM for short follow-up questions based on the
 // just-completed turn. Best-effort: errors and timeouts return nil so the
-// chat stream is never affected by chip generation failures.
-func (s *Service) generateFollowUps(ctx context.Context, provider *llm.LLMModel, query, answer string) []string {
+// chat stream is never affected by chip generation failures. The follow-up
+// call itself is billed when the usage recorder is wired.
+func (s *Service) generateFollowUps(ctx context.Context, tenantID, userID, kbID, convID string, provider *llm.LLMModel, query, answer string) []string {
 	ctx, cancel := context.WithTimeout(ctx, followUpTimeout)
 	defer cancel()
 	prompt := fmt.Sprintf(
@@ -372,12 +396,17 @@ func (s *Service) generateFollowUps(ctx context.Context, provider *llm.LLMModel,
 		truncateRunes(query, followUpMaxQueryChars),
 		truncateRunes(answer, followUpMaxAnswerChars),
 	)
-	resp, err := s.llm.Chat(ctx, provider.Endpoint, provider.APIKey, clients.ChatRequest{
+	resp, usage, err := s.llm.Chat(ctx, provider.Endpoint, provider.APIKey, clients.ChatRequest{
 		Model:       provider.Model,
 		Messages:    []clients.ChatMessage{{Role: "user", Content: prompt}},
 		Temperature: 0.5,
 		MaxTokens:   200,
 	})
+	if usage != nil {
+		s.recordUsage(tenantID, userID, convID, kbID, bill.SourceFollowUps, provider, usage)
+	} else if err == nil {
+		s.recordUsage(tenantID, userID, convID, kbID, bill.SourceFollowUps, provider, chatUsage(prompt, resp))
+	}
 	if err != nil {
 		log.Printf("[chat] follow-up generation failed: %v", err)
 		return nil
@@ -393,11 +422,11 @@ func (s *Service) generateFollowUps(ctx context.Context, provider *llm.LLMModel,
 // message, persists them on the message row, and pushes a follow_ups event.
 // Called after the done event so chip generation never delays the answer;
 // failures are silent (chips are best-effort).
-func (s *Service) emitFollowUps(ctx context.Context, provider *llm.LLMModel, tenantID, convID, msgID, query, answer string, out chan<- StreamReply) {
+func (s *Service) emitFollowUps(ctx context.Context, provider *llm.LLMModel, tenantID, userID, convID, kbID, msgID, query, answer string, out chan<- StreamReply) {
 	if msgID == "" || strings.TrimSpace(answer) == "" {
 		return
 	}
-	questions := s.generateFollowUps(ctx, provider, query, answer)
+	questions := s.generateFollowUps(ctx, tenantID, userID, kbID, convID, provider, query, answer)
 	if len(questions) == 0 {
 		return
 	}
@@ -473,7 +502,7 @@ func (s *Service) runGraph(
 		s.recordExecution(newExecution(tenantID, userID, kbID, convID, query, src, status, answer, messageID, terminal.Type, terminal.Trace, int(time.Since(totalStart).Milliseconds())))
 	}()
 
-	deps := s.graphDeps(tenantID, kbID, query, persist)
+	deps := s.graphDeps(tenantID, userID, kbID, convID, query, persist)
 
 	// Load history for LLM nodes (test mode has no history).
 	var history []*Message
@@ -535,7 +564,7 @@ func (s *Service) runGraph(
 			assistantID = s.saveAssistant(tenantID, convID, text, cits, &ReplyStats{
 				RetrieveMs: retrieveMs,
 				TotalMs:    int(time.Since(totalStart).Milliseconds()),
-			}, "")
+			}, "", false)
 			s.triggerAutoMemory(tenantID, convID)
 			if err := s.repo.TouchConv(tenantID, convID); err != nil {
 				log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, convID, err)
@@ -548,7 +577,7 @@ func (s *Service) runGraph(
 			TotalMs:    int(time.Since(totalStart).Milliseconds()),
 		}, Trace: terminal.Trace})
 		if persist {
-			s.emitFollowUps(ctx, provider, tenantID, convID, assistantID, query, text, out)
+			s.emitFollowUps(ctx, provider, tenantID, userID, convID, kbID, assistantID, query, text, out)
 		}
 
 	case agent.NodeLLM:
@@ -577,7 +606,7 @@ func (s *Service) runGraph(
 		answer = content
 		if streamErr != "" || cancelled {
 			if persist {
-				s.saveAssistant(tenantID, convID, content, cits, nil, reasoning)
+				s.saveAssistant(tenantID, convID, content, cits, nil, reasoning, false)
 			}
 			if streamErr != "" {
 				status = execution.StatusError
@@ -594,9 +623,12 @@ func (s *Service) runGraph(
 			stats.CompletionTokens = usage.CompletionTokens
 			stats.TotalTokens = usage.TotalTokens
 		}
+		// Charge the terminal LLM node to the conversation owner (test mode
+		// has no persisted conversation; userID is the testing user).
+		s.recordUsage(tenantID, userID, convID, kbID, bill.SourceChat, llmProvider, usage)
 		var assistantID string
 		if persist {
-			assistantID = s.saveAssistant(tenantID, convID, content, cits, stats, reasoning)
+			assistantID = s.saveAssistant(tenantID, convID, content, cits, stats, reasoning, false)
 			s.triggerAutoMemory(tenantID, convID)
 			if err := s.repo.TouchConv(tenantID, convID); err != nil {
 				log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, convID, err)
@@ -606,7 +638,7 @@ func (s *Service) runGraph(
 		status = execution.StatusSuccess
 		send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: stats, Trace: terminal.Trace})
 		if persist {
-			s.emitFollowUps(ctx, llmProvider, tenantID, convID, assistantID, query, content, out)
+			s.emitFollowUps(ctx, llmProvider, tenantID, userID, convID, kbID, assistantID, query, content, out)
 		}
 
 	default:
@@ -618,7 +650,7 @@ func (s *Service) runGraph(
 // saveAssistant writes the assistant message row and returns its id. Errors
 // are swallowed because the user already saw the streamed reply; losing the
 // persisted row is recoverable (user can re-ask).
-func (s *Service) saveAssistant(tenantID, convID, content string, cits []Citation, stats *ReplyStats, reasoning string) string {
+func (s *Service) saveAssistant(tenantID, convID, content string, cits []Citation, stats *ReplyStats, reasoning string, annotation bool) string {
 	if strings.TrimSpace(content) == "" {
 		return ""
 	}
@@ -630,6 +662,7 @@ func (s *Service) saveAssistant(tenantID, convID, content string, cits []Citatio
 		Content:        content,
 		Reasoning:      reasoning,
 		Citations:      encodeCitations(cits),
+		Annotation:     annotation,
 	}
 	if stats != nil {
 		m.RetrieveMs = stats.RetrieveMs

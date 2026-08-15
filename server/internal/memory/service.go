@@ -221,7 +221,7 @@ func (s *Service) callSummarizer(ctx context.Context, msgs []*chat.Message, endp
 		Temperature: 0,
 		MaxTokens:   512,
 	}
-	raw, err := s.llm.Chat(ctx, endpoint, apiKey, req)
+	raw, _, err := s.llm.Chat(ctx, endpoint, apiKey, req)
 	if err != nil {
 		return "", nil, fmt.Errorf("llm summarize: %w", err)
 	}

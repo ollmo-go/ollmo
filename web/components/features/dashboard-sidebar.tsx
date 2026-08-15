@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, BarChart3, Cpu, ExternalLink, Key, LayoutDashboard, LogOut, ScrollText, Settings, ShieldAlert, User, UserCog, Users, X } from "lucide-react";
+import { BookOpen, BarChart3, Coins, Cpu, ExternalLink, Key, LayoutDashboard, LogOut, ScrollText, Settings, ShieldAlert, User, UserCog, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useTranslations } from "next-intl";
@@ -60,6 +60,7 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
     { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, color: "blue", exact: true },
     { href: "/dashboard/knowledge-bases", labelKey: "nav.knowledge_bases", icon: BookOpen, color: "green" },
     { href: "/dashboard/analytics", labelKey: "nav.analytics", icon: BarChart3, color: "purple" },
+    { href: "/dashboard/bills", labelKey: "nav.usage", icon: Coins, color: "amber" },
     { href: "/dashboard/settings/models", labelKey: "nav.settings_models", icon: Cpu, color: "orange" },
     { href: "/dashboard/settings/api-keys", labelKey: "nav.api_keys", icon: Key, color: "cyan" },
     ...(isAdmin

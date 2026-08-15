@@ -35,8 +35,12 @@ type LLMModel struct {
 	MaxTokens   int     `gorm:"not null;default:2048" json:"max_tokens"`
 	// ContextLength is the model's input+output window in tokens. 0 means
 	// unknown; the chat service then assumes DefaultContextLength.
-	ContextLength  int        `gorm:"not null;default:0" json:"context_length"`
-	TopP           float64    `gorm:"not null;default:1" json:"top_p"`
+	ContextLength int     `gorm:"not null;default:0" json:"context_length"`
+	TopP          float64 `gorm:"not null;default:1" json:"top_p"`
+	// InputPrice/OutputPrice are the model's cost in yuan per 1M tokens.
+	// 0 means unconfigured; the bill module then charges 0 for this model.
+	InputPrice     float64    `gorm:"not null;default:0" json:"input_price"`
+	OutputPrice    float64    `gorm:"not null;default:0" json:"output_price"`
 	IsDefault      bool       `gorm:"not null;default:false" json:"is_default"`
 	OwnerID        string     `gorm:"size:36;index;not null" json:"owner_id"`
 	Status         string     `gorm:"size:32;not null;default:active" json:"status"`

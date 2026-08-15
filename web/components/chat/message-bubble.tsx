@@ -10,6 +10,20 @@ import { api, Citation, Message } from "@/lib/api";
 import { dedupeByDoc, formatMs, formatScore, safeParseCitations } from "@/lib/utils";
 import { mdComponents } from "@/lib/markdown";
 
+// normalizeAnnotationContent converts single newlines to double newlines
+// so that ReactMarkdown renders proper paragraph breaks. Annotation answers
+// are plain text curated by users, who naturally press Enter for line breaks
+// — but markdown ignores single \n within a paragraph. This function splits
+// on existing \n\n (preserving real paragraphs), then promotes any leftover
+// single \n to \n\n, and rejoins.
+function normalizeAnnotationContent(content: string): string {
+	let normalized = content.replace(/\r\n?/g, "\n");
+	return normalized
+		.split("\n\n")
+		.map((part) => part.replace(/\n/g, "\n\n"))
+		.join("\n\n");
+}
+
 // MessageBubble renders a single chat message (user or assistant) with
 // thinking panel, citations, copy/edit actions, and retrieval stats. Shared
 // by the foreground ChatApp and the agent test drawer so the interaction
@@ -139,7 +153,7 @@ export const MessageBubble = memo(function MessageBubble({
           ) : (
             <div className={`chat-markdown ${streaming && message.content ? "streaming" : ""}`}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                {message.content}
+                {message.annotation ? normalizeAnnotationContent(message.content) : message.content}
               </ReactMarkdown>
             </div>
           )}

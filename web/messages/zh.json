@@ -16,6 +16,7 @@
     "app_name": "ollmo",
     "profile": "个人信息",
     "analytics": "数据分析",
+    "usage": "用量与费用",
     "audit": "审计日志",
     "admin": "后台管理",
     "back_to_chat": "返回对话",
@@ -803,6 +804,29 @@
     "all_actions": "全部操作",
     "empty": "暂无审计日志"
   },
+  "bill": {
+    "title": "用量与费用",
+    "subtitle": "按每次 LLM 调用记录 token 消耗，并依据模型单价估算费用",
+    "total_tokens": "总 Token",
+    "prompt_tokens": "输入 Token",
+    "completion_tokens": "输出 Token",
+    "amount": "预估费用",
+    "call_count": "调用次数",
+    "per_user": "按用户",
+    "per_model": "按模型",
+    "user": "用户",
+    "model": "模型",
+    "source": "来源",
+    "time": "时间",
+    "recent_records": "最近调用",
+    "empty": "暂无调用记录",
+    "estimate_hint": "费用为估算值，按各模型输入/输出单价（元/百万 token）计算；未配置单价的模型费用为 0。",
+    "source_chat": "对话",
+    "source_classifier": "意图分类",
+    "source_intermediate": "中间节点",
+    "source_followups": "追问",
+    "system_user": "(系统)"
+  },
   "backup": {
     "title": "导入/导出",
     "export": "导出知识库",
@@ -812,6 +836,8 @@
     "imported": "已导入 {count} 个文档",
     "exported": "已导出"
   },
+  "footer_copyright": "© {year} Ollmo. 保留所有权利",
+  "footer_site": "访问 Ollmo 官网",
   "conv": {
     "rename": "重命名",
     "pin": "置顶",

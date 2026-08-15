@@ -32,6 +32,9 @@ type CreateInput struct {
 	MaxTokens   int     `json:"max_tokens"`
 	ContextLen  int     `json:"context_length"`
 	TopP        float64 `json:"top_p"`
+	// InputPrice/OutputPrice in yuan per 1M tokens; used for cost estimation.
+	InputPrice  float64 `json:"input_price"`
+	OutputPrice float64 `json:"output_price"`
 	IsDefault   bool    `json:"is_default"`
 }
 
@@ -47,6 +50,9 @@ type UpdateInput struct {
 	TopP        *float64 `json:"top_p"`
 	Status      *string  `json:"status"`
 	IsDefault   *bool    `json:"is_default"`
+	// InputPrice/OutputPrice in yuan per 1M tokens; used for cost estimation.
+	InputPrice  *float64 `json:"input_price"`
+	OutputPrice *float64 `json:"output_price"`
 }
 
 var allowedProviders = map[string]bool{
@@ -82,6 +88,9 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID string, in Creat
 	if in.TopP == 0 {
 		in.TopP = 1
 	}
+	if err := validatePrice(in.InputPrice, in.OutputPrice); err != nil {
+		return nil, err
+	}
 
 	p := &LLMModel{
 		ID:            uuid.NewString(),
@@ -95,6 +104,8 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID string, in Creat
 		MaxTokens:     in.MaxTokens,
 		ContextLength: in.ContextLen,
 		TopP:          in.TopP,
+		InputPrice:    in.InputPrice,
+		OutputPrice:   in.OutputPrice,
 		IsDefault:     in.IsDefault,
 		OwnerID:       ownerID,
 		Status:        StatusActive,
@@ -193,6 +204,20 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInpu
 	if in.IsDefault != nil {
 		p.IsDefault = *in.IsDefault
 	}
+	if in.InputPrice != nil || in.OutputPrice != nil {
+		ip, op := p.InputPrice, p.OutputPrice
+		if in.InputPrice != nil {
+			ip = *in.InputPrice
+		}
+		if in.OutputPrice != nil {
+			op = *in.OutputPrice
+		}
+		if err := validatePrice(ip, op); err != nil {
+			return nil, err
+		}
+		p.InputPrice = ip
+		p.OutputPrice = op
+	}
 	if err := s.repo.Update(p); err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, "update llm provider", err)
 	}
@@ -221,7 +246,7 @@ func (s *Service) Test(ctx context.Context, tenantID, id string) (string, error)
 	if p.Status != StatusActive {
 		return "", errs.BadRequest("provider is not active")
 	}
-	out, err := s.llm.Chat(ctx, p.Endpoint, p.APIKey, clients.ChatRequest{
+	out, _, err := s.llm.Chat(ctx, p.Endpoint, p.APIKey, clients.ChatRequest{
 		Model: p.Model,
 		Messages: []clients.ChatMessage{
 			{Role: "user", Content: "Reply with the single word: ok"},
@@ -254,4 +279,13 @@ func defaultEndpoint(provider string) string {
 	default:
 		return ""
 	}
+}
+
+// validatePrice rejects negative per-1M-token prices. Zero is valid (means
+// the model's cost is not configured and bills charge nothing for it).
+func validatePrice(input, output float64) error {
+	if input < 0 || output < 0 {
+		return errs.BadRequest("prices must be >= 0")
+	}
+	return nil
 }

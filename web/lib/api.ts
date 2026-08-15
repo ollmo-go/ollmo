@@ -297,8 +297,9 @@ export interface Message {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
-  // Client-only flag: this assistant message came from a matched annotation
-  // reply, not the LLM (not persisted server-side).
+  // When true, this assistant message came from a matched annotation
+  // reply rather than LLM generation. Persisted server-side so the
+  // "标注回复" label survives page reloads.
   annotation?: boolean;
   // LLM-generated follow-up suggestions for this assistant message, stored
   // as a JSON string array; rendered as clickable chips under the reply.
@@ -526,6 +527,53 @@ export interface FeedbackItem {
   question: string;
   answer: string;
   vote: string; // "up" | "down"
+  created_at: string;
+}
+
+// Token usage & cost (bill rows written per LLM call). amount is an
+// estimated cost in yuan based on each model's per-1M-token prices.
+export interface BillOverview {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  amount: number;
+  call_count: number;
+}
+
+export interface UserBillTotal {
+  user_id: string;
+  user_name: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  amount: number;
+  call_count: number;
+}
+
+export interface ModelBillTotal {
+  model_id: string;
+  model_name: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  amount: number;
+  call_count: number;
+}
+
+export interface BillRecord {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  kb_id?: string;
+  conversation_id?: string;
+  source: string; // chat | classifier | intermediate | followups
+  provider: string;
+  model_id?: string;
+  model_name: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  amount: number;
   created_at: string;
 }
 
@@ -1313,6 +1361,20 @@ export const api = {
   },
   async analyticsFeedback(limit = 50): Promise<{ items: FeedbackItem[] }> {
     return request(`/analytics/feedback?limit=${limit}`);
+  },
+
+  // Token usage & cost (bill rows written per LLM call)
+  async billOverview(): Promise<BillOverview> {
+    return request("/bills/overview");
+  },
+  async billUsers(): Promise<{ items: UserBillTotal[] }> {
+    return request("/bills/users");
+  },
+  async billModels(): Promise<{ items: ModelBillTotal[] }> {
+    return request("/bills/models");
+  },
+  async billRecords(limit = 100): Promise<{ items: BillRecord[] }> {
+    return request(`/bills/records?limit=${limit}`);
   },
 
   // Audit logs (admin)

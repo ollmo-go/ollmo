@@ -23,8 +23,15 @@ type ExecutionDeps struct {
 	// default.
 	ResolveLLM func(ctx context.Context, tenantID, modelID string) (endpoint, model, apiKey string, err error)
 
-	// ChatComplete does a non-streaming LLM completion. Used by classifier.
-	ChatComplete func(ctx context.Context, endpoint, apiKey string, req clients.ChatRequest) (string, error)
+	// ChatComplete does a non-streaming LLM completion. Used by classifier
+	// and intermediate llm nodes. Returns content, provider usage (nil when
+	// the provider omits it), and error.
+	ChatComplete func(ctx context.Context, endpoint, apiKey string, req clients.ChatRequest) (string, *clients.TokenUsage, error)
+
+	// ChargeLLM records token usage for one completed model call so the
+	// caller can bill it (nil disables). modelID is the resolved llm model
+	// id ("" when unresolved); source classifies the call.
+	ChargeLLM func(modelID, source string, usage *clients.TokenUsage)
 }
 
 // ExecutionEvent is emitted by the executor to signal retrieve/citation/trace
@@ -367,7 +374,7 @@ func execClassifierWithDetail(ctx context.Context, deps ExecutionDeps, tenantID 
 		"你是一个问题分类器。请将用户的问题分类到以下类别之一，只输出类别名称，不要输出其他内容。\n\n类别：\n%s\n\n用户问题：%s",
 		strings.Join(lines, "\n"), ec.Query,
 	)
-	resp, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{
+	resp, usage, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{
 		Model: model,
 		Messages: []clients.ChatMessage{
 			{Role: "system", Content: "You are a question classifier. Reply with only the category name, nothing else."},
@@ -377,6 +384,9 @@ func execClassifierWithDetail(ctx context.Context, deps ExecutionDeps, tenantID 
 	})
 	if err != nil {
 		return firstTarget(edges), "classify error: " + err.Error()
+	}
+	if deps.ChargeLLM != nil {
+		deps.ChargeLLM(modelID, "classifier", usage)
 	}
 	resp = strings.TrimSpace(resp)
 	target := matchEdgeByLabel(edges, resp, cats[0].Name)
@@ -549,12 +559,13 @@ func execIntermediateLLM(ctx context.Context, deps ExecutionDeps, tenantID strin
 	if deps.ResolveLLM == nil || deps.ChatComplete == nil {
 		return "llm deps not wired"
 	}
-	endpoint, model, apiKey, err := deps.ResolveLLM(ctx, tenantID, nodeString(node.Data, "llm_model_id", ""))
+	modelID := nodeString(node.Data, "llm_model_id", "")
+	endpoint, model, apiKey, err := deps.ResolveLLM(ctx, tenantID, modelID)
 	if err != nil {
 		return "llm resolve failed: " + err.Error()
 	}
 	system := renderVars(nodeString(node.Data, "system_prompt", ""), ec.Vars)
-	resp, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{
+	resp, usage, err := deps.ChatComplete(ctx, endpoint, apiKey, clients.ChatRequest{
 		Model: model,
 		Messages: []clients.ChatMessage{
 			{Role: "system", Content: system},
@@ -565,6 +576,9 @@ func execIntermediateLLM(ctx context.Context, deps ExecutionDeps, tenantID strin
 	})
 	if err != nil {
 		return "llm error: " + err.Error()
+	}
+	if deps.ChargeLLM != nil {
+		deps.ChargeLLM(modelID, "intermediate", usage)
 	}
 	out := strings.TrimSpace(resp)
 	ec.setVar(slug+".output", out)
