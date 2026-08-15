@@ -272,6 +272,7 @@
     }
   },
   "common": {
+    "more": "More",
     "save": "Save",
     "cancel": "Cancel",
     "delete": "Delete",
@@ -454,6 +455,14 @@
     "cat_other": "Other",
     "template_default_fallback": "Sorry, no relevant content found in the knowledge base. Please rephrase or provide more details.",
     "template_opening_message": "Hi! I'm your knowledge base assistant. Ask me anything about the knowledge base.",
+    "auto_layout": "Auto layout",
+    "issue_disconnected": "Node is not connected to the flow",
+    "issue_no_prompt": "LLM node has no system prompt",
+    "issue_no_text": "Message node has no reply text",
+    "issue_no_value": "Condition node has no comparison value",
+    "issue_no_categories": "Classifier node has no categories",
+    "validate_block": "The canvas has {count} issue(s); fix them before running",
+    "validate_warn": "Saved, but the canvas still has {count} issue(s)",
     "template_rag_prompt": "You are a knowledge base assistant. Answer the user's question '{'query'}' based on the retrieved context. Only use the provided context, do not make up information; if the context has no answer, say so honestly."
   },
   "memory": {

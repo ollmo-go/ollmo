@@ -269,6 +269,7 @@
     }
   },
   "common": {
+    "more": "更多",
     "save": "保存",
     "cancel": "取消",
     "delete": "删除",
@@ -451,6 +452,14 @@
     "cat_other": "其他问题",
     "template_default_fallback": "抱歉，未在知识库中找到相关内容，请换个问法或补充更多细节。",
     "template_opening_message": "你好！我是知识库助手，你可以向我提问知识库中的内容。",
+    "auto_layout": "整理布局",
+    "issue_disconnected": "节点未连接到流程",
+    "issue_no_prompt": "LLM 节点未设置提示词",
+    "issue_no_text": "回复节点未设置内容",
+    "issue_no_value": "条件节点未设置比较值",
+    "issue_no_categories": "分类节点未配置分类",
+    "validate_block": "画布存在 {count} 个配置问题，请修复后再运行",
+    "validate_warn": "已保存，但画布存在 {count} 个配置问题",
     "template_rag_prompt": "你是知识库问答助手。请根据检索到的上下文回答用户的问题 '{'query'}'。只基于提供的上下文回答，不要编造信息；如果上下文中没有答案，请如实说明。"
   },
   "memory": {

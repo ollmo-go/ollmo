@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import Link from "next/link";
-import { ArrowLeft, Brain, Check, ChevronDown, Download, FileText, Pencil, RefreshCw, Search, Settings2, Trash2, Upload, BookMarked, X } from "lucide-react";
+import { ArrowLeft, Brain, Check, ChevronDown, Download, FileText, MoreVertical, Pencil, RefreshCw, Search, Settings2, Trash2, Upload, BookMarked, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api, Chunk, DocEvent, Document, EmbeddingModel, KnowledgeBase, Paginated } from "@/lib/api";
 import { RetrievalTestDrawer } from "@/components/kb/retrieval-test-drawer";
+import { KBEditDrawer } from "@/components/kb/kb-edit-drawer";
 import { useTranslations } from "next-intl";
 import { useConfirm } from "@/components/ui/confirm";
 import { cn, formatSize } from "@/lib/utils";
@@ -30,6 +31,7 @@ const STATUS_COLOR: Record<string, string> = {
 export default function KBDetailPage() {
   const params = useParams<{ id: string }>();
   const kbId = params.id;
+  const router = useRouter();
   const t = useTranslations();
   const confirm = useConfirm();
 
@@ -71,6 +73,9 @@ export default function KBDetailPage() {
   const [savingChunk, setSavingChunk] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  // "..." overflow menu (edit/delete KB) and its edit drawer.
+  const [kbMenuOpen, setKbMenuOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   useEffect(() => {
     const token = getToken();
@@ -377,6 +382,25 @@ export default function KBDetailPage() {
     }
   }
 
+  // Delete the whole KB, then return to the list page.
+  async function removeKB() {
+    if (!kb) return;
+    const ok = await confirm({
+      title: t("kb.delete_confirm"),
+      description: kb.name,
+      confirmText: t("common.delete"),
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await api.deleteKB(kbId);
+      toast.success(t("toast.deleted"));
+      router.push("/dashboard/knowledge-bases");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+
   function statusLabel(status: string): string {
     const key = `doc.status_key.${status}`;
     const translated = t(key);
@@ -451,6 +475,36 @@ export default function KBDetailPage() {
               {t("kb.memories")}
             </Button>
           </Link>
+          {/* Low-frequency actions (edit/delete) collapsed into an overflow menu */}
+          <div className="relative">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={t("common.more")}
+              onClick={() => setKbMenuOpen((v) => !v)}
+            >
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+            {kbMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setKbMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 w-28 rounded-md border border-border bg-popover shadow-md py-1">
+                  <button
+                    onClick={() => { setKbMenuOpen(false); setEditOpen(true); }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+                  >
+                    <Pencil className="h-3.5 w-3.5" /> {t("common.edit")}
+                  </button>
+                  <button
+                    onClick={() => { setKbMenuOpen(false); removeKB(); }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-accent transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> {t("common.delete")}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <input
           ref={fileRef}
@@ -728,6 +782,17 @@ export default function KBDetailPage() {
 
       {retrievalOpen && (
         <RetrievalTestDrawer kbId={kbId} onClose={() => setRetrievalOpen(false)} />
+      )}
+
+      {editOpen && kb && (
+        <KBEditDrawer
+          kb={kb}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => {
+            setEditOpen(false);
+            mutateKB();
+          }}
+        />
       )}
     </div>
   );
