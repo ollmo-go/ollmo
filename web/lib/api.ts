@@ -103,6 +103,33 @@ export interface Document {
   enabled: boolean;
   chunk_count: number;
   owner_id: string;
+  source_url?: string;
+  metadata?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PreviewChunk {
+  index: number;
+  content: string;
+  token_count: number;
+}
+
+export interface PreviewResult {
+  strategy: string;
+  total: number;
+  token_estimate: number;
+  parent_count?: number;
+  chunks: PreviewChunk[];
+}
+
+export interface Annotation {
+  id: string;
+  tenant_id: string;
+  kb_id: string;
+  question: string;
+  answer: string;
+  enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -220,6 +247,9 @@ export interface Message {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  // Client-only flag: this assistant message came from a matched annotation
+  // reply, not the LLM (not persisted server-side).
+  annotation?: boolean;
   created_at: string;
 }
 
@@ -689,6 +719,68 @@ export const api = {
       method: "DELETE",
     });
   },
+  async previewChunks(
+    kbId: string,
+    body: { text: string; strategy?: string; size?: number; overlap?: number; is_csv?: boolean }
+  ): Promise<PreviewResult> {
+    return request(`/knowledge-bases/${kbId}/documents/preview`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  async updateDocMetadata(kbId: string, docId: string, metadata: Record<string, string>): Promise<Document> {
+    return request(`/knowledge-bases/${kbId}/documents/${docId}/metadata`, {
+      method: "PUT",
+      body: JSON.stringify({ metadata }),
+    });
+  },
+  async batchDeleteDocs(kbId: string, ids: string[]): Promise<{ deleted: number }> {
+    return request(`/knowledge-bases/${kbId}/documents/batch-delete`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  },
+  async batchReparseDocs(kbId: string, ids: string[]): Promise<{ queued: number }> {
+    return request(`/knowledge-bases/${kbId}/documents/batch-reparse`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  },
+  async importURL(kbId: string, url: string): Promise<Document> {
+    return request(`/knowledge-bases/${kbId}/documents/import-url`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    });
+  },
+
+  // Annotations
+  async listAnnotations(kbId: string, page = 1, size = 50): Promise<Paginated<Annotation>> {
+    return request(`/knowledge-bases/${kbId}/annotations/?page=${page}&size=${size}`);
+  },
+  async createAnnotation(
+    kbId: string,
+    body: { question: string; answer: string; enabled?: boolean }
+  ): Promise<Annotation> {
+    return request(`/knowledge-bases/${kbId}/annotations/`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  async updateAnnotation(
+    kbId: string,
+    id: string,
+    body: { question?: string; answer?: string; enabled?: boolean }
+  ): Promise<Annotation> {
+    return request(`/knowledge-bases/${kbId}/annotations/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+  async deleteAnnotation(kbId: string, id: string): Promise<void> {
+    await request(`/knowledge-bases/${kbId}/annotations/${id}`, {
+      method: "DELETE",
+    });
+  },
 
   // LLM providers
   async listLLMs(page = 1, size = 20): Promise<Paginated<LLMModel>> {
@@ -1104,6 +1196,7 @@ export interface StreamReply {
   warning?: string;
   stats?: ReplyStats;
   trace?: TraceStep[];
+  annotation?: boolean;
 }
 
 // streamSSE opens a POST request and parses the Server-Sent Events response.

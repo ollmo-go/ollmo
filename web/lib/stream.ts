@@ -4,7 +4,7 @@ import { Citation, ReplyStats, StreamReply, TraceStep } from "@/lib/api";
  *  phases are silently ignored. */
 export interface StreamCallbacks {
   onCitations?: (cits: Citation[]) => void;
-  onToken?: (token: string) => void;
+  onToken?: (token: string, annotation?: boolean) => void;
   onThinking?: (token: string) => void;
   onDone?: (messageId: string, stats?: ReplyStats, trace?: TraceStep[]) => void;
   onWarning?: (warning: string) => void;
@@ -36,7 +36,7 @@ export async function consumeChatStream(
       if (reply.phase === "retrieve" && reply.citations) {
         cb.onCitations?.(reply.citations);
       } else if (reply.phase === "generate" && reply.token) {
-        cb.onToken?.(reply.token);
+        cb.onToken?.(reply.token, reply.annotation);
       } else if (reply.phase === "thinking" && reply.token) {
         cb.onThinking?.(reply.token);
       } else if (reply.phase === "done") {

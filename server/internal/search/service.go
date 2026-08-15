@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 
 	"ollmo/ollmo/internal/doc"
@@ -56,6 +57,10 @@ func (s *Service) Search(ctx context.Context, tenantID, kbID string, req SearchR
 	if err != nil {
 		return nil, err
 	}
+
+	// Sanitize metadata filters: keys outside [A-Za-z0-9_-] would break the
+	// JSON path in the sparse SQL, so they are dropped instead of erroring.
+	req.Filters = sanitizeFilters(req.Filters)
 
 	// Empty KB shortcut: no documents means no Milvus collection was ever
 	// created, so dense search would fail. Return an empty result instead of
@@ -112,12 +117,19 @@ func (s *Service) Search(ctx context.Context, tenantID, kbID string, req SearchR
 			}
 			denseHits = filtered
 		}
+
+		// Metadata filters: Milvus rows carry no document metadata, so dense
+		// hits are filtered in Go against the doc metadata map. The sparse
+		// leg applies the same filters in SQL.
+		if len(req.Filters) > 0 {
+			denseHits = s.filterDenseByMeta(tenantID, kbID, denseHits, req.Filters)
+		}
 	}
 
 	// 3. lexical search via MySQL FULLTEXT on chunk content. Non-fatal:
 	// if the index is missing or the query has no matches, we fall back to
 	// dense-only retrieval so the search still returns results.
-	sparseHits, _ := s.docRepo.SparseSearch(ctx, tenantID, kbID, req.Query, req.TopK*2)
+	sparseHits, _ := s.docRepo.SparseSearch(ctx, tenantID, kbID, req.Query, req.TopK*2, req.Filters)
 
 	// 4. RRF fusion across rank lists. VectorWeight (0..1) biases the fusion
 	// towards the dense leg; nil keeps the equal-weight default.
@@ -225,6 +237,12 @@ func (s *Service) Search(ctx context.Context, tenantID, kbID string, req SearchR
 		hits = hits[:req.TopK]
 	}
 
+	// Parent expansion for parent_child chunking: replace the matched child's
+	// content with its wider parent text and dedupe siblings hitting the same
+	// parent (keep the highest-scoring child's score/page). Legacy chunks
+	// (no parent) pass through unchanged.
+	hits = s.expandParents(tenantID, hits)
+
 	// 7. GraphRAG: query the knowledge graph for entities mentioned in the
 	// query and include their descriptions + relationships as supplementary
 	// context. Non-fatal: empty graph context is fine for KBs without
@@ -274,6 +292,109 @@ func toDebugHits(raw []vector.SearchHit, docNames map[string]string) []SearchHit
 			Content: h.Content,
 			Score:   float64(h.Score),
 		})
+	}
+	return out
+}
+
+// expandParents maps child hits to their parent chunks and dedupes by parent.
+// ChunkID stays the matched child (for page citations); Content becomes the
+// parent text that reaches the LLM prompt.
+func (s *Service) expandParents(tenantID string, hits []SearchHit) []SearchHit {
+	if len(hits) == 0 {
+		return hits
+	}
+	ids := make([]string, 0, len(hits))
+	for _, h := range hits {
+		ids = append(ids, h.ChunkID)
+	}
+	parentOf, err := s.docRepo.FindChunkParentIDs(tenantID, ids)
+	if err != nil || len(parentOf) == 0 {
+		return hits
+	}
+	parentIDs := make([]string, 0, len(parentOf))
+	seen := make(map[string]bool, len(parentOf))
+	for _, pid := range parentOf {
+		if !seen[pid] {
+			seen[pid] = true
+			parentIDs = append(parentIDs, pid)
+		}
+	}
+	parents, err := s.docRepo.FindChunksByIDs(tenantID, parentIDs)
+	if err != nil {
+		return hits
+	}
+
+	out := make([]SearchHit, 0, len(hits))
+	emitted := make(map[string]bool, len(parentIDs))
+	for _, h := range hits {
+		pid := parentOf[h.ChunkID]
+		if pid == "" {
+			out = append(out, h)
+			continue
+		}
+		if emitted[pid] {
+			continue // sibling of an already-emitted parent
+		}
+		emitted[pid] = true
+		if p, ok := parents[pid]; ok && p.Content != "" {
+			h.Content = p.Content
+		}
+		h.ParentID = pid
+		out = append(out, h)
+	}
+	return out
+}
+
+// filterDenseByMeta drops dense hits whose document metadata does not match
+// every filter pair. Metadata JSON is small; parse per doc on demand.
+func (s *Service) filterDenseByMeta(tenantID, kbID string, hits []vector.SearchHit, filters map[string]string) []vector.SearchHit {
+	docMeta, err := s.docRepo.ListDocMeta(tenantID, kbID)
+	if err != nil {
+		log.Printf("[search] list doc meta failed tenant=%s kb=%s: %v", tenantID, kbID, err)
+		return hits
+	}
+	if len(docMeta) == 0 {
+		return nil // no doc carries metadata: nothing can match a filter
+	}
+	matched := make(map[string]bool, len(docMeta))
+	for docID, raw := range docMeta {
+		var meta map[string]string
+		if json.Unmarshal([]byte(raw), &meta) != nil {
+			continue
+		}
+		ok := true
+		for k, v := range filters {
+			if meta[k] != v {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			matched[docID] = true
+		}
+	}
+	out := hits[:0]
+	for _, h := range hits {
+		if matched[h.DocID] {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// sanitizeFilters drops entries with invalid keys or empty values.
+func sanitizeFilters(filters map[string]string) map[string]string {
+	if len(filters) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(filters))
+	for k, v := range filters {
+		if doc.ValidMetadataKey(k) && v != "" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

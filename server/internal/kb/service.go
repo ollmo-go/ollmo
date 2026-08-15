@@ -27,6 +27,7 @@ type Service struct {
 	repo          *Repo
 	store         *vector.Store
 	reembedder    Reembedder
+	annSyncer     AnnSyncer
 	embedDefault  EmbeddingDefaultFinder
 	embedResolver EmbeddingResolver
 }
@@ -38,12 +39,26 @@ type Reembedder interface {
 	ReembedAll(ctx context.Context, tenantID, kbID string) error
 }
 
+// AnnSyncer keeps annotation vectors in sync with KB lifecycle events.
+// Implemented by annotation.Service; kept as an interface here to avoid a
+// circular dependency (annotation imports kb for the repo).
+type AnnSyncer interface {
+	SyncOnDelete(ctx context.Context, tenantID, kbID string) error
+	SyncOnEmbeddingChange(ctx context.Context, tenantID, kbID string) error
+}
+
 func NewService(repo *Repo, store *vector.Store) *Service {
 	return &Service{repo: repo, store: store}
 }
 
 func (s *Service) WithReembedder(r Reembedder) *Service {
 	s.reembedder = r
+	return s
+}
+
+// WithAnnSyncer wires the annotation cleanup/rebuild hooks.
+func (s *Service) WithAnnSyncer(a AnnSyncer) *Service {
+	s.annSyncer = a
 	return s
 }
 
@@ -178,6 +193,13 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInpu
 					return nil, errs.Wrap(errs.CodeInternal, "reembed docs", err)
 				}
 			}
+			// Annotation question vectors share the KB's embedding model;
+			// rebuild them against the new model.
+			if s.annSyncer != nil {
+				if err := s.annSyncer.SyncOnEmbeddingChange(ctx, tenantID, id); err != nil {
+					log.Printf("[kb] rebuild annotation vectors failed kb=%s: %v", id, err)
+				}
+			}
 		}
 	}
 	if err := s.repo.Update(k); err != nil {
@@ -202,6 +224,11 @@ func (s *Service) Delete(ctx context.Context, tenantID, id string) error {
 	if s.store != nil {
 		if err := s.store.DropCollection(ctx, id); err != nil {
 			log.Printf("[kb] drop collection failed kb=%s: %v", id, err)
+		}
+	}
+	if s.annSyncer != nil {
+		if err := s.annSyncer.SyncOnDelete(ctx, tenantID, id); err != nil {
+			log.Printf("[kb] cleanup annotations failed kb=%s: %v", id, err)
 		}
 	}
 	return s.repo.Delete(tenantID, id)

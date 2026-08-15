@@ -156,6 +156,79 @@ func chunkParentChild(md string, chunkSize, chunkOverlap int) []string {
 	return chunks
 }
 
+// ParentChunk is a retrieval unit for the two-level parent_child strategy:
+// small children are embedded and searched, while the wider parent text is
+// what finally reaches the LLM prompt.
+type ParentChunk struct {
+	Parent   string
+	Children []string
+}
+
+// SplitParentChild produces two-level chunks: children sized childSize (the
+// KB's chunk_size) for precise embedding match, and parents sized parentSize
+// (chunk_size * 4, capped) that keep the surrounding context. Sections are
+// the parent boundary; consecutive small sections are packed into one parent
+// so short documents do not explode into one-parent-per-paragraph.
+func SplitParentChild(md string, childSize, parentSize int) []ParentChunk {
+	if childSize <= 0 {
+		childSize = 500
+	}
+	if parentSize <= childSize {
+		parentSize = childSize * 4
+	}
+	if parentSize > 4000 {
+		parentSize = 4000
+	}
+
+	var out []ParentChunk
+	var curParent strings.Builder
+	curLen := 0
+
+	flush := func() {
+		if curLen == 0 {
+			return
+		}
+		parent := strings.TrimSpace(curParent.String())
+		curParent.Reset()
+		curLen = 0
+		children := chunkByParagraph(parent, childSize)
+		if len(children) == 0 {
+			return
+		}
+		out = append(out, ParentChunk{Parent: parent, Children: children})
+	}
+
+	for _, sec := range splitSections(md) {
+		body := strings.TrimSpace(sec.header + sec.body)
+		if body == "" {
+			continue
+		}
+		// Oversized section: it becomes its own sequence of parents so a
+		// single huge section cannot overflow the parent budget.
+		if len(body) > parentSize {
+			flush()
+			for _, piece := range chunkByParagraph(body, parentSize) {
+				children := chunkByParagraph(piece, childSize)
+				if len(children) > 0 {
+					out = append(out, ParentChunk{Parent: piece, Children: children})
+				}
+			}
+			continue
+		}
+		if curLen+len(body) > parentSize && curLen > 0 {
+			flush()
+		}
+		if curLen > 0 {
+			curParent.WriteString("\n\n")
+			curLen += 2
+		}
+		curParent.WriteString(body)
+		curLen += len(body)
+	}
+	flush()
+	return out
+}
+
 // chunkByHeader splits markdown on # / ## / ### headers. Each section keeps
 // its header line so the LLM can cite the section title.
 func chunkByHeader(md string, chunkSize, chunkOverlap int) []string {

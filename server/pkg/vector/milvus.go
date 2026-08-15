@@ -49,6 +49,12 @@ func CollectionName(kbID string) string {
 	return "kb_" + sanitize(kbID)
 }
 
+// AnnCollectionName returns the collection holding annotation question
+// embeddings for a KB (annotation reply matching).
+func AnnCollectionName(kbID string) string {
+	return "ann_" + sanitize(kbID)
+}
+
 // EmbeddingDim returns the vector dimension for a model name. Unknown models
 // must fail loudly so KB creation does not silently pick a wrong dim. The
 // org prefix (e.g. "BAAI/" on SiliconFlow) is stripped before matching so
@@ -73,12 +79,22 @@ func EmbeddingDim(model string) (int, error) {
 	}
 }
 
-// EnsureCollection creates the collection + HNSW index if missing and loads
-// it. Idempotent; safe to call on every upsert. The same KB always maps to
-// the same dim, so re-creation never collides.
+// EnsureCollection creates the KB chunk collection + HNSW index if missing
+// and loads it. Idempotent; safe to call on every upsert. The same KB always
+// maps to the same dim, so re-creation never collides.
 func (s *Store) EnsureCollection(ctx context.Context, kbID, embeddingModel string) error {
-	coll := CollectionName(kbID)
+	return s.ensureNamed(ctx, CollectionName(kbID), embeddingModel)
+}
 
+// EnsureAnnotationCollection ensures the collection for annotation question
+// embeddings of a KB. Same schema as the chunk collection; doc_id stays empty.
+func (s *Store) EnsureAnnotationCollection(ctx context.Context, kbID, embeddingModel string) error {
+	return s.ensureNamed(ctx, AnnCollectionName(kbID), embeddingModel)
+}
+
+// ensureNamed creates a collection with the shared chunk schema if missing,
+// creates the HNSW index, and loads it. Safe to call repeatedly.
+func (s *Store) ensureNamed(ctx context.Context, coll, embeddingModel string) error {
 	s.mu.Lock()
 	if s.ensured[coll] {
 		s.mu.Unlock()
@@ -137,14 +153,24 @@ func buildSchema(name string, dim int) (*entity.Schema, error) {
 	return schema, nil
 }
 
-// Upsert batches records into Milvus columns and upserts them. Records with
-// no embedding (e.g. empty chunk) are skipped. Content is truncated to
+// Upsert batches records into the KB's chunk collection. Records with no
+// embedding (e.g. empty chunk) are skipped. Content is truncated to
 // MaxContentLen so over-long chunks do not fail the whole batch.
 func (s *Store) Upsert(ctx context.Context, kbID string, records []ChunkRecord) (int, error) {
+	return s.UpsertNamed(ctx, CollectionName(kbID), records)
+}
+
+// UpsertAnnotation upserts annotation question embeddings into the KB's
+// annotation collection. The record ID is the annotation ID.
+func (s *Store) UpsertAnnotation(ctx context.Context, kbID string, records []ChunkRecord) (int, error) {
+	return s.UpsertNamed(ctx, AnnCollectionName(kbID), records)
+}
+
+// UpsertNamed batches records into an arbitrary collection.
+func (s *Store) UpsertNamed(ctx context.Context, coll string, records []ChunkRecord) (int, error) {
 	if len(records) == 0 {
 		return 0, nil
 	}
-	coll := CollectionName(kbID)
 
 	ids := make([]string, 0, len(records))
 	tenants := make([]string, 0, len(records))
@@ -197,21 +223,24 @@ func vectorDim(vectors [][]float32) int {
 
 // DeleteByDoc removes all vectors for a document. Used by doc.Delete.
 func (s *Store) DeleteByDoc(ctx context.Context, kbID, docID string) error {
-	coll := CollectionName(kbID)
-	expr := fmt.Sprintf("doc_id == %q", docID)
-	if err := s.cli.Delete(ctx, coll, "", expr); err != nil {
-		return errs.Wrap(errs.CodeInternal, "milvus delete by doc", err)
-	}
-	return nil
+	return s.DeleteExpr(ctx, CollectionName(kbID), fmt.Sprintf("doc_id == %q", docID), "milvus delete by doc")
 }
 
 // DeleteByID removes a single vector by its chunk ID (Milvus primary key).
 // Used when a user deletes an individual chunk from the UI.
 func (s *Store) DeleteByID(ctx context.Context, kbID, chunkID string) error {
-	coll := CollectionName(kbID)
-	expr := fmt.Sprintf("id == %q", chunkID)
+	return s.DeleteExpr(ctx, CollectionName(kbID), fmt.Sprintf("id == %q", chunkID), "milvus delete by id")
+}
+
+// DeleteAnnotation removes an annotation's question vector.
+func (s *Store) DeleteAnnotation(ctx context.Context, kbID, annotationID string) error {
+	return s.DeleteExpr(ctx, AnnCollectionName(kbID), fmt.Sprintf("id == %q", annotationID), "milvus delete annotation")
+}
+
+// DeleteExpr removes vectors matching a boolean expression in the collection.
+func (s *Store) DeleteExpr(ctx context.Context, coll, expr, what string) error {
 	if err := s.cli.Delete(ctx, coll, "", expr); err != nil {
-		return errs.Wrap(errs.CodeInternal, "milvus delete by id", err)
+		return errs.Wrap(errs.CodeInternal, what, err)
 	}
 	return nil
 }
@@ -225,14 +254,23 @@ type SearchHit struct {
 	Score   float32
 }
 
-// Search runs a dense ANN search on the KB's collection, scoped to the
+// Search runs a dense ANN search on the KB's chunk collection, scoped to the
 // tenant via an expression filter. The collection must already exist
 // (EnsureCollection is called by the embed worker on first embed).
 func (s *Store) Search(ctx context.Context, kbID, tenantID string, query []float32, topK int) ([]SearchHit, error) {
+	return s.SearchNamed(ctx, CollectionName(kbID), tenantID, query, topK)
+}
+
+// SearchAnnotation runs a dense search over the KB's annotation questions.
+func (s *Store) SearchAnnotation(ctx context.Context, kbID, tenantID string, query []float32, topK int) ([]SearchHit, error) {
+	return s.SearchNamed(ctx, AnnCollectionName(kbID), tenantID, query, topK)
+}
+
+// SearchNamed runs a dense ANN search on an arbitrary collection.
+func (s *Store) SearchNamed(ctx context.Context, coll, tenantID string, query []float32, topK int) ([]SearchHit, error) {
 	if topK <= 0 {
 		topK = 10
 	}
-	coll := CollectionName(kbID)
 
 	sp, err := entity.NewIndexHNSWSearchParam(64) // ef=64, good quality/speed tradeoff
 	if err != nil {
@@ -293,9 +331,20 @@ func (s *Store) Search(ctx context.Context, kbID, tenantID string, query []float
 	return hits, nil
 }
 
-// DropCollection removes the collection entirely. Used when a KB is deleted.
+// DropCollection removes the KB chunk collection entirely. Used when a KB is
+// deleted.
 func (s *Store) DropCollection(ctx context.Context, kbID string) error {
-	coll := CollectionName(kbID)
+	return s.DropNamed(ctx, CollectionName(kbID))
+}
+
+// DropAnnotationCollection removes the KB annotation collection. Used when a
+// KB is deleted.
+func (s *Store) DropAnnotationCollection(ctx context.Context, kbID string) error {
+	return s.DropNamed(ctx, AnnCollectionName(kbID))
+}
+
+// DropNamed removes a collection by name if it exists.
+func (s *Store) DropNamed(ctx context.Context, coll string) error {
 	has, err := s.cli.HasCollection(ctx, coll)
 	if err != nil {
 		return err

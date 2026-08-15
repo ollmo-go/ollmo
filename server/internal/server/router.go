@@ -11,6 +11,7 @@ import (
 
 	"ollmo/ollmo/internal/agent"
 	"ollmo/ollmo/internal/analytics"
+	"ollmo/ollmo/internal/annotation"
 	"ollmo/ollmo/internal/apikey"
 	"ollmo/ollmo/internal/audit"
 	"ollmo/ollmo/internal/auth"
@@ -399,6 +400,10 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	docGrp := kbGrp.Group("/:kbId/documents")
 	docGrp.Post("/", kbWrite, docHandler.Upload)
 	docGrp.Get("/", kbRead, docHandler.List)
+	docGrp.Post("/preview", kbRead, docHandler.PreviewChunks)
+	docGrp.Post("/import-url", kbWrite, docHandler.ImportURL)
+	docGrp.Post("/batch-delete", kbWrite, docHandler.BatchDelete)
+	docGrp.Post("/batch-reparse", kbWrite, docHandler.BatchReparse)
 	docGrp.Get("/:id", kbRead, docHandler.Get)
 	docGrp.Get("/:id/content", kbRead, docHandler.Content)
 	docGrp.Get("/:id/chunks", kbRead, docHandler.ListChunks)
@@ -407,9 +412,20 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	docGrp.Delete("/:id", kbWrite, docHandler.Delete)
 	docGrp.Post("/:id/reparse", kbWrite, docHandler.Reparse)
 	docGrp.Put("/:id/enabled", kbWrite, docHandler.SetEnabled)
+	docGrp.Put("/:id/metadata", kbWrite, docHandler.UpdateMetadata)
 
 	// SSE stream for real-time document status updates.
 	protected.Get("/documents/events", doc.SSEHandler(docEventBus))
+
+	// Annotation replies (curated Q&A matched by embedding similarity).
+	annSvc := annotation.NewService(annotation.NewRepo(deps.DB), kbRepo, deps.Vector, embedResolver)
+	kbSvc.WithAnnSyncer(annSvc)
+	annHandler := annotation.NewHandler(annSvc)
+	annGrp := kbGrp.Group("/:kbId/annotations")
+	annGrp.Get("/", kbRead, annHandler.List)
+	annGrp.Post("/", kbWrite, annHandler.Create)
+	annGrp.Put("/:id", kbWrite, annHandler.Update)
+	annGrp.Delete("/:id", kbWrite, annHandler.Delete)
 
 	// LLM models.
 	llmRepo := llm.NewRepo(deps.DB, crypto.FromPassphrase(deps.cfg.Auth.EncryptionKey))
@@ -500,7 +516,8 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 		WithConversationDeleted(func(tenantID, convID string) {
 			memorySvc.DeleteByConversation(tenantID, convID)
 		}).
-		WithMessageQuota(quotaChecker)
+		WithMessageQuota(quotaChecker).
+		WithAnnotations(annSvc)
 	chatHandler := chat.NewHandler(chatSvc)
 	protected.Post("/knowledge-bases/:kbId/conversations", kbRead, chatHandler.Create)
 	protected.Get("/conversations", chatHandler.List)

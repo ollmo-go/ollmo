@@ -73,6 +73,11 @@ export function MessageBubble({
             }`
         }`}
       >
+        {!isUser && message.annotation && (
+          <span className="inline-flex items-center rounded px-1.5 py-px mb-1.5 text-[10px] font-medium bg-primary/10 border border-primary/20 text-primary">
+            {t("chat.annotation_reply")}
+          </span>
+        )}
         {hasReasoning && !isUser && (
           <div className="mb-2 border-b border-border/40 pb-2">
             <button

@@ -171,3 +171,93 @@ func (h *Handler) DeleteChunk(c *fiber.Ctx) error {
 	}
 	return response.NoContent(c)
 }
+
+// PreviewChunks chunks sample text with the requested parameters so users can
+// tune chunk_size/strategy before uploading. Read-only; nothing persists.
+func (h *Handler) PreviewChunks(c *fiber.Ctx) error {
+	var body struct {
+		Text     string `json:"text"`
+		Strategy string `json:"strategy"`
+		Size     int    `json:"size"`
+		Overlap  int    `json:"overlap"`
+		IsCSV    bool   `json:"is_csv"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
+	}
+	if len(body.Text) > 2<<20 {
+		return response.Fail(c, errs.BadRequest("text too large (max 2MB)"))
+	}
+	res, err := h.svc.PreviewChunks(c.Context(), middleware.TenantID(c), c.Params("kbId"),
+		body.Text, body.Strategy, body.Size, body.Overlap, body.IsCSV)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	return response.OK(c, res)
+}
+
+// UpdateMetadata stores the document's metadata map (retrieval filters).
+func (h *Handler) UpdateMetadata(c *fiber.Ctx) error {
+	var body struct {
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
+	}
+	doc, err := h.svc.UpdateMetadata(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id"), body.Metadata)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	return response.OK(c, doc)
+}
+
+// BatchDelete removes multiple documents in one call.
+func (h *Handler) BatchDelete(c *fiber.Ctx) error {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
+	}
+	if len(body.IDs) == 0 {
+		return response.Fail(c, errs.BadRequest("ids is required"))
+	}
+	deleted, err := h.svc.DeleteBatch(c.Context(), middleware.TenantID(c), c.Params("kbId"), body.IDs)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	return response.OK(c, fiber.Map{"deleted": deleted})
+}
+
+// BatchReparse re-enqueues parse tasks for multiple documents.
+func (h *Handler) BatchReparse(c *fiber.Ctx) error {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
+	}
+	if len(body.IDs) == 0 {
+		return response.Fail(c, errs.BadRequest("ids is required"))
+	}
+	queued, err := h.svc.ReparseBatch(c.Context(), middleware.TenantID(c), c.Params("kbId"), body.IDs)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	return response.OK(c, fiber.Map{"queued": queued})
+}
+
+// ImportURL fetches a web page and ingests its text as a new document.
+func (h *Handler) ImportURL(c *fiber.Ctx) error {
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
+	}
+	doc, err := h.svc.ImportURL(c.Context(), middleware.TenantID(c), middleware.UserID(c), c.Params("kbId"), body.URL)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	return response.Created(c, doc)
+}

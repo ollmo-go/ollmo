@@ -190,30 +190,8 @@ func (w *Worker) HandleParse(ctx context.Context, t *asynq.Task) error {
 	// Chunk and persist using the pipeline chunker config. The QA strategy
 	// only applies to CSV uploads (one question/answer pair per row); it
 	// falls back to the regular text strategy for any other format.
-	var chunks []string
-	if strings.EqualFold(pc.Chunker.Strategy, chunker.StrategyQA) && strings.HasSuffix(strings.ToLower(p.ObjectKey), ".csv") {
-		chunks = chunker.SplitQA(markdown)
-		logf("qa chunking produced %d chunks", len(chunks))
-	}
-	if len(chunks) == 0 {
-		chunks = chunker.SplitMarkdown(markdown, pc.Chunker.Strategy, pc.Chunker.Size, pc.Chunker.Overlap)
-	}
-	logf("chunked into %d pieces (strategy=%s)", len(chunks), pc.Chunker.Strategy)
-	pages := chunkPageNumbers(markdown, pageBlocks, chunks)
+	chunkModels, childCount := w.buildChunks(p, pc, markdown, pageBlocks, logf)
 
-	chunkModels := make([]*Chunk, 0, len(chunks))
-	for i, c := range chunks {
-		chunkModels = append(chunkModels, &Chunk{
-			ID:          uuid.NewString(),
-			TenantID:    p.TenantID,
-			KbID:        p.KbID,
-			DocID:       p.DocID,
-			Index:       i,
-			Content:     c,
-			TokenCount:  tokener.Estimate(c),
-			PageNumbers: pages[i],
-		})
-	}
 	// Atomically swap the old chunk set for the new one. Old chunks are only
 	// deleted once the new parse + chunking succeeded, so a failure above
 	// leaves the previous data untouched.
@@ -231,17 +209,81 @@ func (w *Worker) HandleParse(ctx context.Context, t *asynq.Task) error {
 		}
 	}
 
-	if err := w.svc.MarkParsed(p.TenantID, p.DocID, parsedKey, len(chunks)); err != nil {
+	if err := w.svc.MarkParsed(p.TenantID, p.DocID, parsedKey, childCount); err != nil {
 		return fmt.Errorf("mark parsed: %w", err)
 	}
 
-	logf("done, %d chunks saved, enqueuing embed", len(chunks))
+	logf("done, %d chunks saved, enqueuing embed", childCount)
 	if err := w.svc.EnqueueEmbed(ctx, p.TenantID, p.KbID, p.DocID); err != nil {
 		// Non-fatal for parse: doc is in parsed state and can be re-embedded
 		// from the UI. Log and continue so parse does not retry.
 		logf("enqueue embed failed: %v", err)
 	}
 	return nil
+}
+
+// buildChunks turns parsed markdown into Chunk rows per the chunker config.
+// parent_child emits parent rows (role=parent, not embedded) plus child rows
+// referencing them; other strategies emit flat chunks. Returns the models and
+// the child (searchable) count used for doc.chunk_count.
+func (w *Worker) buildChunks(p ParseDocumentPayload, pc pipeline.IngestionConfig, markdown string, pageBlocks []pageBlock, logf func(string, ...any)) ([]*Chunk, int) {
+	isCSV := strings.HasSuffix(strings.ToLower(p.ObjectKey), ".csv")
+	if strings.EqualFold(pc.Chunker.Strategy, chunker.StrategyQA) && isCSV {
+		qa := chunker.SplitQA(markdown)
+		if len(qa) > 0 {
+			logf("qa chunking produced %d chunks", len(qa))
+			pages := chunkPageNumbers(markdown, pageBlocks, qa)
+			models := make([]*Chunk, 0, len(qa))
+			for i, c := range qa {
+				models = append(models, &Chunk{
+					ID: uuid.NewString(), TenantID: p.TenantID, KbID: p.KbID, DocID: p.DocID,
+					Index: i, Content: c, TokenCount: tokener.Estimate(c), PageNumbers: pages[i],
+				})
+			}
+			return models, len(qa)
+		}
+	}
+
+	if strings.EqualFold(pc.Chunker.Strategy, chunker.StrategyParentChild) {
+		pcs := chunker.SplitParentChild(markdown, pc.Chunker.Size, pc.Chunker.Size*4)
+		var childTexts []string
+		for _, pcChunk := range pcs {
+			childTexts = append(childTexts, pcChunk.Children...)
+		}
+		pages := chunkPageNumbers(markdown, pageBlocks, childTexts)
+		models := make([]*Chunk, 0, len(childTexts)+len(pcs))
+		idx, ci := 0, 0
+		for _, pcChunk := range pcs {
+			parentID := uuid.NewString()
+			models = append(models, &Chunk{
+				ID: parentID, TenantID: p.TenantID, KbID: p.KbID, DocID: p.DocID,
+				Role: ChunkRoleParent, Index: idx, Content: pcChunk.Parent, TokenCount: tokener.Estimate(pcChunk.Parent),
+			})
+			idx++
+			for _, child := range pcChunk.Children {
+				models = append(models, &Chunk{
+					ID: uuid.NewString(), TenantID: p.TenantID, KbID: p.KbID, DocID: p.DocID,
+					ParentID: parentID, Index: idx, Content: child, TokenCount: tokener.Estimate(child), PageNumbers: pages[ci],
+				})
+				idx++
+				ci++
+			}
+		}
+		logf("parent_child chunking: %d parents, %d children", len(pcs), ci)
+		return models, ci
+	}
+
+	chunks := chunker.SplitMarkdown(markdown, pc.Chunker.Strategy, pc.Chunker.Size, pc.Chunker.Overlap)
+	logf("chunked into %d pieces (strategy=%s)", len(chunks), pc.Chunker.Strategy)
+	pages := chunkPageNumbers(markdown, pageBlocks, chunks)
+	models := make([]*Chunk, 0, len(chunks))
+	for i, c := range chunks {
+		models = append(models, &Chunk{
+			ID: uuid.NewString(), TenantID: p.TenantID, KbID: p.KbID, DocID: p.DocID,
+			Index: i, Content: c, TokenCount: tokener.Estimate(c), PageNumbers: pages[i],
+		})
+	}
+	return models, len(chunks)
 }
 
 // HandleEmbed is the asynq.HandlerFunc for TaskEmbedDocument. It re-reads
@@ -297,10 +339,17 @@ func (w *Worker) HandleEmbed(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("ensure collection: %w", err)
 	}
 
-	chunks, err := w.svc.ListAllChunksByDoc(ctx, p.TenantID, p.KbID, p.DocID)
+	allChunks, err := w.svc.ListAllChunksByDoc(ctx, p.TenantID, p.KbID, p.DocID)
 	if err != nil {
 		w.markFailedAndLog(p.TenantID, p.DocID, "list chunks: "+err.Error())
 		return fmt.Errorf("list chunks: %w", err)
+	}
+	// Parent rows carry context only; children are the searchable units.
+	chunks := make([]*Chunk, 0, len(allChunks))
+	for _, c := range allChunks {
+		if c.Role != ChunkRoleParent {
+			chunks = append(chunks, c)
+		}
 	}
 	if len(chunks) == 0 {
 		w.markFailedAndLog(p.TenantID, p.DocID, "no chunks to embed")

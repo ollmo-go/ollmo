@@ -294,12 +294,17 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     let doneMsgId = "";
     let streamError = "";
     let doneStats: ReplyStats | undefined;
+    let annReply = false;
 
     try {
       const stream = api.streamChat(convId, { message: text }, controller.signal);
       const { error } = await consumeChatStream(stream, {
         onCitations: (c) => { cits = c; setPendingCitations(c); },
-        onToken: (tk) => { acc += tk; setStreamedText(acc); },
+        onToken: (tk, annotation) => {
+          acc += tk;
+          setStreamedText(acc);
+          if (annotation) annReply = true;
+        },
         onThinking: (tk) => { thinkAcc += tk; setStreamedThinking(thinkAcc); },
         onDone: (id, stats) => { doneMsgId = id; doneStats = stats; },
         onWarning: (w) => { acc += `⚠️ ${w}\n\n`; setStreamedText(acc); },
@@ -326,6 +331,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
             prompt_tokens: doneStats?.prompt_tokens,
             completion_tokens: doneStats?.completion_tokens,
             total_tokens: doneStats?.total_tokens,
+            annotation: annReply || undefined,
             created_at: new Date().toISOString(),
           },
         ]);

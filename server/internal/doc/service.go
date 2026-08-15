@@ -2,10 +2,14 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +19,10 @@ import (
 
 	"ollmo/ollmo/internal/embedding"
 	"ollmo/ollmo/internal/kb"
+	"ollmo/ollmo/pkg/chunker"
 	"ollmo/ollmo/pkg/errs"
+	"ollmo/ollmo/pkg/htmltext"
+	"ollmo/ollmo/pkg/tokener"
 	"ollmo/ollmo/pkg/vector"
 )
 
@@ -134,6 +141,255 @@ func (s *Service) Upload(ctx context.Context, tenantID, ownerID, kbID, filename,
 
 func (s *Service) Get(ctx context.Context, tenantID, kbID, id string) (*Document, error) {
 	return s.repo.FindDoc(tenantID, kbID, id)
+}
+
+// ---- Chunk preview ----
+
+// PreviewChunk is one chunk of a preview result.
+type PreviewChunk struct {
+	Index      int    `json:"index"`
+	Content    string `json:"content"`
+	TokenCount int    `json:"token_count"`
+}
+
+// PreviewResult answers "what will my chunking produce" before uploading.
+// Chunks is capped for display; Total and TokenEstimate cover everything.
+type PreviewResult struct {
+	Strategy      string         `json:"strategy"`
+	Total         int            `json:"total"`
+	TokenEstimate int            `json:"token_estimate"`
+	ParentCount   int            `json:"parent_count,omitempty"`
+	Chunks        []PreviewChunk `json:"chunks"`
+}
+
+// previewChunkLimit caps the returned chunk samples; the totals still count
+// every chunk.
+const previewChunkLimit = 30
+
+// PreviewChunks chunks the given text with the requested parameters. Empty
+// strategy/size fall back to the KB-level defaults. isCSV routes through the
+// QA splitter, mirroring the parse worker's behavior for CSV uploads.
+func (s *Service) PreviewChunks(ctx context.Context, tenantID, kbID, text, strategy string, size, overlap int, isCSV bool) (*PreviewResult, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, errs.BadRequest("text is required")
+	}
+	kbCfg, err := s.kbRepo.FindByID(tenantID, kbID)
+	if err != nil {
+		return nil, err
+	}
+	if strategy == "" {
+		strategy = kbCfg.ChunkStrategy
+	}
+	if size <= 0 {
+		size = kbCfg.ChunkSize
+	}
+	if overlap < 0 {
+		overlap = kbCfg.ChunkOverlap
+	}
+
+	res := &PreviewResult{Strategy: strategy}
+	var samples []string
+	var parents int
+	if isCSV && strings.EqualFold(strategy, chunker.StrategyQA) {
+		chunks := chunker.SplitQA(text)
+		res.Total = len(chunks)
+		samples = chunks
+	} else if strings.EqualFold(strategy, chunker.StrategyParentChild) {
+		pcs := chunker.SplitParentChild(text, size, size*4)
+		parents = len(pcs)
+		for _, pc := range pcs {
+			res.Total += len(pc.Children)
+			if len(samples) < previewChunkLimit {
+				samples = append(samples, pc.Children...)
+			}
+		}
+	} else {
+		chunks := chunker.SplitMarkdown(text, strategy, size, overlap)
+		res.Total = len(chunks)
+		samples = chunks
+	}
+	res.ParentCount = parents
+
+	for i, c := range samples {
+		if i >= previewChunkLimit {
+			break
+		}
+		tok := tokener.Estimate(c)
+		res.TokenEstimate += tok
+		res.Chunks = append(res.Chunks, PreviewChunk{Index: i, Content: c, TokenCount: tok})
+	}
+	return res, nil
+}
+
+// ---- Metadata ----
+
+// metadataLimits keep the JSON small enough for inline filtering.
+const (
+	maxMetadataPairs = 16
+	maxMetadataValue = 200
+)
+
+// UpdateMetadata validates and stores a document's metadata map. An empty map
+// clears the column.
+func (s *Service) UpdateMetadata(ctx context.Context, tenantID, kbID, id string, meta map[string]string) (*Document, error) {
+	d, err := s.repo.FindDoc(tenantID, kbID, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(meta) > maxMetadataPairs {
+		return nil, errs.BadRequest("too many metadata pairs (max 16)")
+	}
+	for k, v := range meta {
+		if !ValidMetadataKey(k) {
+			return nil, errs.BadRequest("invalid metadata key (letters, digits, - and _ only)")
+		}
+		if len(v) > maxMetadataValue {
+			return nil, errs.BadRequest("metadata value too long (max 200 chars)")
+		}
+	}
+	stored := ""
+	if len(meta) > 0 {
+		b, err := json.Marshal(meta)
+		if err != nil {
+			return nil, errs.BadRequest("invalid metadata")
+		}
+		stored = string(b)
+	}
+	if err := s.repo.UpdateDocMetadata(tenantID, kbID, id, stored); err != nil {
+		return nil, err
+	}
+	d.Metadata = stored
+	return d, nil
+}
+
+// ---- Batch operations ----
+
+// DeleteBatch removes documents one by one, collecting per-doc failures so
+// one missing row does not abort the batch.
+func (s *Service) DeleteBatch(ctx context.Context, tenantID, kbID string, ids []string) (deleted int, err error) {
+	for _, id := range ids {
+		if dErr := s.Delete(ctx, tenantID, kbID, id); dErr != nil {
+			err = dErr
+			continue
+		}
+		deleted++
+	}
+	return deleted, err
+}
+
+// ReparseBatch re-enqueues parse tasks for the given documents.
+func (s *Service) ReparseBatch(ctx context.Context, tenantID, kbID string, ids []string) (queued int, err error) {
+	for _, id := range ids {
+		if rErr := s.Reparse(ctx, tenantID, kbID, id); rErr != nil {
+			err = rErr
+			continue
+		}
+		queued++
+	}
+	return queued, err
+}
+
+// ---- URL import ----
+
+// importLimits bound a single page fetch.
+const (
+	importMaxBytes = 5 << 20 // 5 MB
+	importTimeout  = 20 * time.Second
+)
+
+// ImportURL fetches one web page, extracts its text, and ingests it as a new
+// document that flows through the normal parse pipeline (as .txt).
+func (s *Service) ImportURL(ctx context.Context, tenantID, ownerID, kbID, rawURL string) (*Document, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, errs.BadRequest("invalid http(s) url")
+	}
+	k, err := s.kbRepo.FindByID(tenantID, kbID)
+	if err != nil {
+		return nil, err
+	}
+	if k.EmbeddingModelID == "" {
+		return nil, errs.BadRequest("knowledge base has no embedding model; configure one before importing")
+	}
+	if s.quotaChecker != nil {
+		if err := s.quotaChecker.CheckDocQuota(tenantID); err != nil {
+			return nil, err
+		}
+	}
+
+	client := &http.Client{Timeout: importTimeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, errs.BadRequest("invalid url")
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; ollmo-import/1.0)")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeBadRequest, "fetch url", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, errs.BadRequest(fmt.Sprintf("fetch failed: HTTP %d", resp.StatusCode))
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, importMaxBytes))
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, "read page", err)
+	}
+	if len(body) == 0 {
+		return nil, errs.BadRequest("page is empty")
+	}
+
+	title, text := htmltext.Extract(string(body))
+	if strings.TrimSpace(text) == "" {
+		return nil, errs.BadRequest("no text content extracted from page")
+	}
+
+	name := title
+	if name == "" {
+		name = u.Host + u.Path
+	}
+	if len(name) > 200 {
+		name = name[:200]
+	}
+
+	docID := uuid.NewString()
+	objectKey := fmt.Sprintf("docs/%s/%s/%s/original.txt", tenantID, kbID, docID)
+	if _, err := s.minio.PutObject(ctx, s.bucket, objectKey, strings.NewReader(text), int64(len(text)),
+		minio.PutObjectOptions{ContentType: "text/plain"}); err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, "store page", err)
+	}
+
+	doc := &Document{
+		ID: docID, TenantID: tenantID, KbID: kbID,
+		Name: name, Size: int64(len(text)), MimeType: "text/html",
+		ObjectKey: objectKey, SourceURL: u.String(), Status: StatusQueued, OwnerID: ownerID,
+	}
+	if err := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(doc).Error; err != nil {
+			return err
+		}
+		return tx.Model(&kb.KnowledgeBase{}).
+			Where("tenant_id = ? AND id = ?", tenantID, kbID).
+			UpdateColumn("doc_count", gorm.Expr("doc_count + 1")).Error
+	}); err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, "create doc + count", err)
+	}
+
+	task, err := NewParseDocumentTask(ParseDocumentPayload{
+		TenantID: tenantID, KbID: kbID, DocID: docID, ObjectKey: objectKey,
+	})
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, "build parse task", err)
+	}
+	if _, err := s.asynq.EnqueueContext(ctx, task,
+		asynq.MaxRetry(3), asynq.Timeout(30*time.Minute), asynq.Queue(QueuePipeline),
+	); err != nil {
+		if uerr := s.repo.UpdateDocStatus(tenantID, docID, StatusFailed, "enqueue: "+err.Error()); uerr != nil {
+			log.Printf("[doc] failed to mark imported doc %s as failed: %v", docID, uerr)
+		}
+		return nil, errs.Wrap(errs.CodeInternal, "enqueue parse task", err)
+	}
+	return doc, nil
 }
 
 // GetContent returns the parsed document content (markdown/text) stored in

@@ -16,10 +16,15 @@ type SearchRequest struct {
 	RerankModelID string   `json:"rerank_model_id,omitempty"`
 	VectorWeight  *float64 `json:"vector_weight,omitempty"`
 	Debug         bool     `json:"debug,omitempty"`
+	// Filters narrows retrieval to documents whose metadata matches every
+	// key/value pair (AND semantics). Keys must match [A-Za-z0-9_-].
+	Filters map[string]string `json:"filters,omitempty"`
 }
 
 // SearchHit is one retrieved chunk plus the doc it came from. The chat domain
-// consumes this list to build the LLM context.
+// consumes this list to build the LLM context. For parent_child chunking,
+// ParentID is set and Content carries the wider parent text; ChunkID stays
+// the matched child for citation page numbers.
 type SearchHit struct {
 	ChunkID     string  `json:"chunk_id"`
 	DocID       string  `json:"doc_id"`
@@ -27,6 +32,7 @@ type SearchHit struct {
 	Content     string  `json:"content"`
 	Score       float64 `json:"score"`
 	PageNumbers string  `json:"page_numbers,omitempty"`
+	ParentID    string  `json:"parent_id,omitempty"`
 }
 
 // SearchResult is the response envelope. Sparse and Rerank indicate which

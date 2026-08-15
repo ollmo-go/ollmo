@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"ollmo/ollmo/internal/agent"
+	"ollmo/ollmo/internal/annotation"
 	"ollmo/ollmo/internal/llm"
 	"ollmo/ollmo/internal/search"
 	"ollmo/ollmo/pkg/clients"
@@ -192,6 +193,16 @@ func (s *Service) runStream(
 		query = in.Message
 	}
 
+	// Annotation reply: a close-enough question match short-circuits the
+	// whole pipeline (retrieval, agent graph, LLM) and streams the curated
+	// answer verbatim.
+	if s.annMatch != nil {
+		if m := s.annMatch.Match(ctx, tenantID, conv.KbID, query); m != nil {
+			s.replyAnnotation(ctx, tenantID, conv, m, out, totalStart)
+			return
+		}
+	}
+
 	// Try graph-based execution when a full agent definition is available.
 	// This supports classifier/condition/message routing. Falls back to the
 	// flat ExecutionConfig path when no definition is wired.
@@ -276,6 +287,23 @@ func (s *Service) runStream(
 	assistantID := s.saveAssistant(tenantID, conv.ID, content, cits, stats, reasoning)
 	s.triggerAutoMemory(tenantID, conv.ID)
 	send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: stats})
+	if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
+		log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
+	}
+}
+
+// replyAnnotation streams a matched annotation answer: one generate event
+// with the full text, then done. The reply is persisted like any assistant
+// message so history and the left list stay consistent.
+func (s *Service) replyAnnotation(ctx context.Context, tenantID string, conv *Conversation, m *annotation.MatchResult, out chan<- StreamReply, start time.Time) {
+	answer := m.Annotation.Answer
+	stats := &ReplyStats{TotalMs: int(time.Since(start).Milliseconds())}
+	if !send(ctx, out, StreamReply{Phase: PhaseGenerate, Token: answer, Annotation: true}) {
+		s.saveAssistant(tenantID, conv.ID, answer, nil, nil, "")
+		return
+	}
+	assistantID := s.saveAssistant(tenantID, conv.ID, answer, nil, stats, "")
+	send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: stats, Annotation: true})
 	if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
 		log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
 	}

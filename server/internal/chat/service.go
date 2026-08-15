@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"ollmo/ollmo/internal/agent"
+	"ollmo/ollmo/internal/annotation"
 	"ollmo/ollmo/internal/llm"
 	"ollmo/ollmo/internal/search"
 	"ollmo/ollmo/pkg/clients"
@@ -68,10 +69,24 @@ type Service struct {
 	autoMem   AutoMemoryTrigger
 	onConvDel ConversationDeletedHook
 	msgQuota  MessageQuotaChecker
+	annMatch  AnnotationMatcher
 }
 
 func NewService(repo *Repo, searchSvc *search.Service, llmRepo *llm.Repo, llm *clients.LLMClient) *Service {
 	return &Service{repo: repo, searchSvc: searchSvc, llmRepo: llmRepo, llm: llm, history: 30}
+}
+
+// AnnotationMatcher returns the curated answer when the query closely
+// matches a KB annotation question. Implemented by annotation.Service.
+type AnnotationMatcher interface {
+	Match(ctx context.Context, tenantID, kbID, query string) *annotation.MatchResult
+}
+
+// WithAnnotations wires the annotation reply matcher. On a qualified match
+// the stream short-circuits retrieval + LLM and returns the stored answer.
+func (s *Service) WithAnnotations(m AnnotationMatcher) *Service {
+	s.annMatch = m
+	return s
 }
 
 // WithAgentConfig wires the agent config fetcher. When set, each Stream call
@@ -294,6 +309,9 @@ type StreamReply struct {
 	Warning   string            `json:"warning,omitempty"`
 	Stats     *ReplyStats       `json:"stats,omitempty"`
 	Trace     []agent.TraceStep `json:"trace,omitempty"`
+	// Annotation marks generate/done events whose content came from a
+	// matched annotation reply rather than the LLM.
+	Annotation bool `json:"annotation,omitempty"`
 }
 
 // ReplyStats carries timing and token usage for a completed chat turn.

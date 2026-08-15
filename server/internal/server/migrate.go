@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"ollmo/ollmo/internal/agent"
+	"ollmo/ollmo/internal/annotation"
 	"ollmo/ollmo/internal/apikey"
 	"ollmo/ollmo/internal/audit"
 	"ollmo/ollmo/internal/chat"
@@ -40,6 +41,7 @@ func RunMigrate(cfg *config.Config) error {
 		&kb.KnowledgeBase{},
 		&doc.Document{},
 		&doc.Chunk{},
+		&annotation.Annotation{},
 		&llm.LLMModel{},
 		&embedding.EmbeddingModel{},
 		&rerank.RerankModel{},

@@ -3,6 +3,9 @@ package doc
 import (
 	"context"
 	"errors"
+	"regexp"
+	"sort"
+	"strings"
 
 	"ollmo/ollmo/pkg/errs"
 	"ollmo/ollmo/pkg/vector"
@@ -64,6 +67,20 @@ func (r *Repo) UpdateDocStatus(tenantID, id, status, parseErr string) error {
 	return r.db.Model(&Document{}).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
 		Updates(map[string]any{"status": status, "parse_error": parseErr}).Error
+}
+
+// UpdateDocMetadata stores the document metadata JSON ("" clears it).
+func (r *Repo) UpdateDocMetadata(tenantID, kbID, id, metadata string) error {
+	res := r.db.Model(&Document{}).
+		Where("tenant_id = ? AND kb_id = ? AND id = ?", tenantID, kbID, id).
+		Update("metadata", metadata)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errs.NotFound("document not found")
+	}
+	return nil
 }
 
 func (r *Repo) SetDocEnabled(tenantID, kbID, id string, enabled bool) error {
@@ -234,8 +251,9 @@ func (r *Repo) DeleteChunk(tenantID, kbID, chunkID string) error {
 // KB. Results are ranked by InnoDB's relevance score, a TF-IDF variant
 // (TF * IDF^2, no document-length normalization), not BM25. Used as the
 // lexical leg of hybrid retrieval; fused with dense Milvus hits via RRF in
-// the search service.
-func (r *Repo) SparseSearch(ctx context.Context, tenantID, kbID, query string, topK int) ([]vector.SearchHit, error) {
+// the search service. Parent chunks (role=parent) are excluded — children are
+// the searchable units; filters narrow results by document metadata (AND).
+func (r *Repo) SparseSearch(ctx context.Context, tenantID, kbID, query string, topK int, filters map[string]string) ([]vector.SearchHit, error) {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -246,16 +264,22 @@ func (r *Repo) SparseSearch(ctx context.Context, tenantID, kbID, query string, t
 		Score   float64
 	}
 	var rows []sparseRow
+
+	condSQL, condArgs := metadataFilterSQL(filters)
 	sql := `SELECT c.id, c.doc_id, c.content,
 			MATCH(c.content) AGAINST(? IN NATURAL LANGUAGE MODE) AS score
 			FROM chunks c
 			INNER JOIN documents d ON c.doc_id = d.id AND c.tenant_id = d.tenant_id
 			WHERE c.tenant_id = ? AND c.kb_id = ?
+			  AND c.role <> ?
 			  AND d.enabled = true
+			  ` + condSQL + `
 			  AND MATCH(c.content) AGAINST(? IN NATURAL LANGUAGE MODE)
 			ORDER BY score DESC
 			LIMIT ?`
-	if err := r.db.WithContext(ctx).Raw(sql, query, tenantID, kbID, query, topK).Scan(&rows).Error; err != nil {
+	args := append([]any{query, tenantID, kbID, ChunkRoleParent}, condArgs...)
+	args = append(args, query, topK)
+	if err := r.db.WithContext(ctx).Raw(sql, args...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	hits := make([]vector.SearchHit, 0, len(rows))
@@ -268,4 +292,102 @@ func (r *Repo) SparseSearch(ctx context.Context, tenantID, kbID, query string, t
 		})
 	}
 	return hits, nil
+}
+
+// metadataKeyPattern whitelists metadata keys embedded into JSON path SQL.
+// Keys cannot be parameterized, so anything outside this set is rejected by
+// the caller before reaching SQL.
+const metadataKeyPattern = `^[A-Za-z0-9_-]{1,64}$`
+
+// ValidMetadataKey reports whether a filter key is safe for SQL JSON paths.
+func ValidMetadataKey(k string) bool {
+	ok, _ := regexp.MatchString(metadataKeyPattern, k)
+	return ok
+}
+
+// metadataFilterSQL builds "AND JSON_UNQUOTE(JSON_EXTRACT(...)) = ?" clauses
+// per filter (AND semantics). Keys must already be validated; values are
+// parameterized.
+func metadataFilterSQL(filters map[string]string) (string, []any) {
+	if len(filters) == 0 {
+		return "", nil
+	}
+	keys := make([]string, 0, len(filters))
+	for k := range filters {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	args := make([]any, 0, len(filters))
+	for _, k := range keys {
+		sb.WriteString(" AND JSON_UNQUOTE(JSON_EXTRACT(d.metadata, '$.")
+		sb.WriteString(k)
+		sb.WriteString("')) = ?")
+		args = append(args, filters[k])
+	}
+	return sb.String(), args
+}
+
+// FindChunkParentIDs returns chunk_id -> parent_id for chunks that belong to
+// a parent (parent_child strategy). Used by search to expand hits.
+func (r *Repo) FindChunkParentIDs(tenantID string, chunkIDs []string) (map[string]string, error) {
+	if len(chunkIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	type row struct {
+		ID       string
+		ParentID string
+	}
+	var rows []row
+	err := r.db.Model(&Chunk{}).
+		Select("id, parent_id").
+		Where("tenant_id = ? AND id IN ? AND parent_id <> ''", tenantID, chunkIDs).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.ID] = r.ParentID
+	}
+	return out, nil
+}
+
+// FindChunksByIDs returns chunk rows keyed by ID (parents included).
+func (r *Repo) FindChunksByIDs(tenantID string, ids []string) (map[string]*Chunk, error) {
+	if len(ids) == 0 {
+		return map[string]*Chunk{}, nil
+	}
+	var rows []*Chunk
+	if err := r.db.Where("tenant_id = ? AND id IN ?", tenantID, ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]*Chunk, len(rows))
+	for _, c := range rows {
+		out[c.ID] = c
+	}
+	return out, nil
+}
+
+// ListDocMeta returns doc_id -> metadata JSON text for docs in a KB that have
+// metadata set. Used by the dense leg to filter Milvus hits in Go (Milvus
+// rows do not carry document metadata).
+func (r *Repo) ListDocMeta(tenantID, kbID string) (map[string]string, error) {
+	type row struct {
+		ID       string
+		Metadata string
+	}
+	var rows []row
+	err := r.db.Model(&Document{}).
+		Select("id, metadata").
+		Where("tenant_id = ? AND kb_id = ? AND metadata <> ''", tenantID, kbID).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.ID] = r.Metadata
+	}
+	return out, nil
 }
