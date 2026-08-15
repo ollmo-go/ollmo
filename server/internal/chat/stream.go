@@ -77,6 +77,13 @@ func (s *Service) graphDeps(tenantID, kbID, query string) agent.ExecutionDeps {
 	}
 }
 
+// DebugAgentNode runs one agent node in isolation for the canvas "test this
+// node" action. Nothing is persisted.
+func (s *Service) DebugAgentNode(ctx context.Context, tenantID, kbID string, node agent.Node, query string) (*agent.NodeDebugResult, error) {
+	deps := s.graphDeps(tenantID, kbID, query)
+	return agent.DebugNode(ctx, deps, tenantID, kbID, node, query)
+}
+
 // send delivers a reply to the client channel, respecting ctx cancellation.
 // Returns false when ctx is cancelled (client disconnected) so the caller can
 // stop streaming and persist partial results instead of blocking forever on a

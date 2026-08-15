@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 
+	"ollmo/ollmo/internal/agent"
 	"ollmo/ollmo/internal/middleware"
 	"ollmo/ollmo/pkg/errs"
 	"ollmo/ollmo/pkg/response"
@@ -186,6 +188,33 @@ func (h *Handler) TestChat(c *fiber.Ctx) error {
 	}
 	writeSSE(c, ch)
 	return nil
+}
+
+// DebugNode runs a single agent node in isolation (canvas "test this node").
+// Returns the node's output without walking the graph or persisting anything.
+func (h *Handler) DebugNode(c *fiber.Ctx) error {
+	kbID := c.Params("kbId")
+	if kbID == "" {
+		return response.Fail(c, errs.BadRequest("kb_id is required"))
+	}
+	var in struct {
+		Node  agent.Node `json:"node"`
+		Query string     `json:"query"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
+	}
+	if in.Node.Type == "" {
+		return response.Fail(c, errs.BadRequest("node is required"))
+	}
+	if strings.TrimSpace(in.Query) == "" {
+		return response.Fail(c, errs.BadRequest("query is required"))
+	}
+	res, err := h.svc.DebugAgentNode(c.Context(), middleware.TenantID(c), kbID, in.Node, in.Query)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	return response.OK(c, res)
 }
 
 // sseHeartbeat is the interval between SSE comment heartbeats. A package

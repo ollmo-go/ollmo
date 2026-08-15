@@ -864,6 +864,19 @@ export const api = {
     ) as AsyncGenerator<StreamReply>;
   },
 
+  // debugAgentNode runs one agent node in isolation (canvas "test this
+  // node"). Returns the node's output without walking the whole graph.
+  async debugAgentNode(
+    kbId: string,
+    node: AgentNode,
+    query: string
+  ): Promise<NodeDebugResult> {
+    return request(`/knowledge-bases/${kbId}/debug-node`, {
+      method: "POST",
+      body: JSON.stringify({ node, query }),
+    });
+  },
+
   // Message quota: remaining is the effective daily remaining (min of tenant
   // and user remaining); quota is the user's personal limit (-1 = unlimited).
   async getMessageQuota(): Promise<{ remaining: number; quota: number }> {
@@ -1068,6 +1081,18 @@ export interface TraceStep {
   status?: string;
   duration_ms?: number;
   detail?: string;
+}
+
+// Result of the single-node debug API (agent canvas "test this node").
+export interface NodeDebugResult {
+  type: string;
+  text?: string;
+  hits?: number;
+  top_score?: number;
+  context?: string;
+  duration_ms?: number;
+  /** Variables the executor would set after running this node. */
+  variables?: Record<string, string>;
 }
 
 export interface StreamReply {

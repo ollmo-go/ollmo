@@ -10,7 +10,7 @@ import {
   useReactFlow,
   type EdgeProps,
 } from "reactflow";
-import { Search, Brain, MessageSquare, GitBranch, Split, Check, X, AlertCircle } from "lucide-react";
+import { Search, Brain, MessageSquare, GitBranch, Split, Check, X, AlertCircle, StickyNote } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { normalizeCategories } from "./agent-config-panel";
 
@@ -184,12 +184,46 @@ export const ClassifierNode = memo(({ id, data, selected }: NodeCompProps) => {
   );
 });
 
+// NoteNode is a sticky note for documenting the canvas. It never executes:
+// no handles (cannot be wired into the flow) and the executor skips it
+// because isolated nodes are never enqueued.
+export const NoteNode = memo(({ id, data, selected }: NodeCompProps) => {
+  const t = useTranslations();
+  const onDelete = useDeleteNode(id);
+  const text = String(data.text || "");
+  return (
+    <div
+      className={`relative w-56 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 shadow-sm ${
+        selected ? "ring-2 ring-primary/40" : ""
+      }`}
+    >
+      <div className="flex items-center gap-1.5 mb-1 text-amber-600 dark:text-amber-400">
+        <StickyNote className="h-3.5 w-3.5" />
+        <span className="text-xs font-medium">{t("agent.node_note")}</span>
+      </div>
+      <div className="text-xs whitespace-pre-wrap text-foreground/90 min-h-4 line-clamp-6">
+        {text || t("agent.note_placeholder")}
+      </div>
+      {selected && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 transition-colors nodrag"
+          aria-label="delete"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+});
+
 export const agentNodeTypes = {
   retrieval: RetrievalNode,
   llm: LLMNode,
   message: MessageNode,
   condition: ConditionNode,
   classifier: ClassifierNode,
+  note: NoteNode,
 };
 
 // LabeledEdge renders the branch label as an HTML badge via EdgeLabelRenderer

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Play, Save, Send, Square, X, Plus, Search, Brain, MessageSquare, GitBranch, Split, LayoutGrid } from "lucide-react";
+import { ArrowLeft, Play, Save, Send, Square, X, Plus, Search, Brain, MessageSquare, GitBranch, Split, LayoutGrid, Redo2, StickyNote, Undo2 } from "lucide-react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -49,7 +49,7 @@ function toFlow(def: AgentDefinition): { nodes: Node[]; edges: Edge[] } {
   // outputs become referenceable.
   const raw = def.nodes.filter((n: AgentNode) => n.type !== "start" && n.type !== "end");
   const slugged = raw.map((n) =>
-    n.data?.slug ? n : { ...n, data: { ...n.data, slug: nextSlug(raw, n.type) } }
+    n.data?.slug || n.type === "note" ? n : { ...n, data: { ...n.data, slug: nextSlug(raw, n.type) } }
   );
   const nodes: Node[] = slugged.map((n: AgentNode) => ({
     id: n.id,
@@ -360,6 +360,7 @@ const DEFAULT_NODE_DATA: Record<string, Record<string, unknown>> = {
   message: { text: "" },
   condition: { variable: "query", operator: "contains", value: "" },
   classifier: { categories: [], llm_model_id: "" },
+  note: { text: "" },
 };
 
 // Node card metrics for dagre: width w-52 = 208px, content height ~76px.
@@ -398,6 +399,8 @@ function validateGraph(
     connected.add(e.target);
   });
   for (const n of nodes) {
+    // Notes are documentation, not flow steps: an unconnected note is fine.
+    if (n.type === "note") continue;
     if (!connected.has(n.id)) push(n.id, t("agent.issue_disconnected"));
     const d = n.data as Record<string, unknown>;
     if (n.type === "llm" && !String(d.system_prompt ?? "").trim()) push(n.id, t("agent.issue_no_prompt"));
@@ -433,6 +436,63 @@ function AgentCanvas() {
   const [traceEdges, setTraceEdges] = useState<Set<string>>(new Set());
   // node_id -> { status, ms } runtime badge filled in from trace steps.
   const [nodeRuntime, setNodeRuntime] = useState<Record<string, { status: string; ms: number }>>({});
+
+  // Undo/redo: snapshots of {nodes, edges} taken before structural changes
+  // (add/delete node, connect/reconnect/delete edge, template, auto-layout,
+  // node drag). Panel field edits are intentionally not snapshotted — they
+  // are per-keystroke and would flood the stack.
+  const pastRef = useRef<{ nodes: Node[]; edges: Edge[] }[]>([]);
+  const futureRef = useRef<{ nodes: Node[]; edges: Edge[] }[]>([]);
+  // Bumped on every stack change so toolbar buttons re-render.
+  const [histVer, setHistVer] = useState(0);
+
+  const deepCopy = (v: unknown) => JSON.parse(JSON.stringify(v));
+
+  const takeSnapshot = useCallback(() => {
+    pastRef.current.push({ nodes: deepCopy(nodes) as Node[], edges: deepCopy(edges) as Edge[] });
+    if (pastRef.current.length > 50) pastRef.current.shift();
+    futureRef.current = [];
+    setHistVer((v) => v + 1);
+  }, [nodes, edges]);
+
+  const undo = useCallback(() => {
+    const prev = pastRef.current.pop();
+    if (!prev) return;
+    futureRef.current.push({ nodes: deepCopy(nodes) as Node[], edges: deepCopy(edges) as Edge[] });
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+    setDirty(true);
+    setHistVer((v) => v + 1);
+  }, [nodes, edges, setNodes, setEdges]);
+
+  const redo = useCallback(() => {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    pastRef.current.push({ nodes: deepCopy(nodes) as Node[], edges: deepCopy(edges) as Edge[] });
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setDirty(true);
+    setHistVer((v) => v + 1);
+  }, [nodes, edges, setNodes, setEdges]);
+
+  // Stack lengths are read during render; histVer's changes trigger the
+  // re-render that picks them up.
+  const canUndo = histVer >= 0 && pastRef.current.length > 0;
+  const canRedo = histVer >= 0 && futureRef.current.length > 0;
+
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, ignored while typing in form controls.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      if (e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
 
   useEffect(() => {
     if (!agent || loaded) return;
@@ -496,6 +556,7 @@ function AgentCanvas() {
 
   const onConnect = useCallback(
     (conn: Connection) => {
+      takeSnapshot();
       const srcNode = nodes.find((n) => n.id === conn.source);
       setEdges((eds) => {
         let label: string | undefined;
@@ -517,33 +578,37 @@ function AgentCanvas() {
       });
       setDirty(true);
     },
-    [setEdges, nodes, t]
+    [setEdges, nodes, t, takeSnapshot]
   );
 
   // Reconnect an existing edge by dragging its endpoint to another node.
   const onEdgeUpdate = useCallback(
     (oldEdge: Edge, newConnection: Connection) => {
+      takeSnapshot();
       setEdges((eds) => updateEdge(oldEdge, newConnection, eds));
       setDirty(true);
     },
-    [setEdges]
+    [setEdges, takeSnapshot]
   );
 
   const onEdgeLabelChange = useCallback(
     (id: string, label: string) => {
+      takeSnapshot();
       setEdges((eds) => eds.map((e) => (e.id === id ? { ...e, label } : e)));
       setDirty(true);
     },
-    [setEdges]
+    [setEdges, takeSnapshot]
   );
 
   function addNode(type: string) {
+    takeSnapshot();
     const id = `n${Date.now()}`;
     const newNode: Node = {
       id,
       type,
       position: { x: 200 + Math.random() * 100, y: 150 + Math.random() * 100 },
-      data: { ...DEFAULT_NODE_DATA[type], slug: nextSlug(nodes, type) },
+      // Notes are documentation: no slug, no execution, no variables.
+      data: type === "note" ? { ...DEFAULT_NODE_DATA.note } : { ...DEFAULT_NODE_DATA[type], slug: nextSlug(nodes, type) },
     };
     setNodes((nds) => [...nds, newNode]);
     setSelectedId(id);
@@ -556,6 +621,7 @@ function AgentCanvas() {
   // minimal: retrieval → llm (2 nodes).
   // standard: classifier → retrieval → condition → llm/message (5 nodes).
   function applyTemplate(template: "minimal" | "standard") {
+    takeSnapshot();
     const now = Date.now();
     let templateNodes: Node[];
     let templateEdges: Edge[];
@@ -670,10 +736,11 @@ function AgentCanvas() {
 
   // autoLayout re-arranges the canvas with dagre and frames the result.
   const autoLayout = useCallback(() => {
+    takeSnapshot();
     setNodes((nds) => layoutNodes(nds, edges));
     setDirty(true);
     setTimeout(() => fitView({ padding: 0.2 }), 60);
-  }, [edges, setNodes, fitView]);
+  }, [edges, setNodes, fitView, takeSnapshot]);
 
   const displayEdges = useMemo(() => {
     if (traceEdges.size === 0) return edges;
@@ -718,8 +785,9 @@ function AgentCanvas() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <Card>
             <CardContent className="p-0" style={{ overflow: "hidden" }}>
-              {/* Node palette toolbar */}
-              <div className="relative border-b px-3 py-2 flex items-center gap-2">
+              {/* Node palette toolbar; wraps on narrow viewports instead of
+                  overflowing the card. */}
+              <div className="relative border-b px-3 py-2 flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
                   variant="outline"
@@ -727,6 +795,16 @@ function AgentCanvas() {
                 >
                   <Plus className="h-3.5 w-3.5 mr-1" />
                   {t("agent.add_node")}
+                </Button>
+                {/* Sticky note: canvas documentation, deliberately kept out of
+                    the node palette — it is not an executable node. */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => addNode("note")}
+                >
+                  <StickyNote className="h-3.5 w-3.5 mr-1" />
+                  {t("agent.node_note")}
                 </Button>
                 <Button
                   size="sm"
@@ -736,6 +814,28 @@ function AgentCanvas() {
                 >
                   <LayoutGrid className="h-3.5 w-3.5 mr-1" />
                   {t("agent.auto_layout")}
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-7 w-7"
+                  onClick={undo}
+                  disabled={!canUndo}
+                  aria-label={t("agent.undo")}
+                  title={t("agent.undo")}
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-7 w-7"
+                  onClick={redo}
+                  disabled={!canRedo}
+                  aria-label={t("agent.redo")}
+                  title={t("agent.redo")}
+                >
+                  <Redo2 className="h-3.5 w-3.5" />
                 </Button>
                 {paletteOpen && (
                   <div className="absolute top-full left-3 mt-1 z-10 rounded-md border border-border bg-popover shadow-md py-1 w-40">
@@ -782,8 +882,9 @@ function AgentCanvas() {
                   onPaneClick={() => { setSelectedId(null); setSelectedEdgeId(null); setPaletteOpen(false); }}
                   onConnect={onConnect}
                   onEdgeUpdate={onEdgeUpdate}
-                  onNodesDelete={() => setDirty(true)}
-                  onEdgesDelete={() => setDirty(true)}
+                  onNodeDragStart={() => takeSnapshot()}
+                  onNodesDelete={() => { takeSnapshot(); setDirty(true); }}
+                  onEdgesDelete={() => { takeSnapshot(); setDirty(true); }}
                   nodeTypes={agentNodeTypes}
                   edgeTypes={agentEdgeTypes}
                   nodesDraggable
@@ -812,7 +913,9 @@ function AgentCanvas() {
             <CardHeader className="shrink-0">
               <CardTitle className="text-sm">{t("agent.config")}</CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto">
+            {/* overflow-x-hidden: the 280px panel wraps all content; any
+                unexpected intrinsic width must never surface a scrollbar. */}
+            <CardContent className="flex-1 overflow-y-auto overflow-x-hidden">
               <AgentConfigPanel
                 node={selectedNode as AgentNode | null}
                 edge={selectedEdge as AgentEdge | null}
@@ -826,6 +929,7 @@ function AgentCanvas() {
                 onSuggestedQuestionsChange={(v) => { setSuggestedQuestions(v); setDirty(true); }}
                 allNodes={nodes as unknown as AgentNode[]}
                 allEdges={edges as unknown as AgentEdge[]}
+                kbId={kbId}
               />
             </CardContent>
           </Card>

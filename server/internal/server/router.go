@@ -512,6 +512,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	protected.Delete("/conversations/:id", chatHandler.Delete)
 	protected.Post("/conversations/:id/messages/stream", chatHandler.Stream)
 	protected.Post("/knowledge-bases/:kbId/test-chat", kbRead, chatHandler.TestChat)
+	protected.Post("/knowledge-bases/:kbId/debug-node", kbRead, chatHandler.DebugNode)
 	protected.Get("/quota/messages", chatHandler.MessageQuota)
 
 	// Memory: conversation summaries for cross-session context.

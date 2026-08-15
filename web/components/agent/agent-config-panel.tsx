@@ -2,9 +2,10 @@
 
 import { useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { AgentEdge, AgentNode, LLMModel, Paginated, RerankModel, api } from "@/lib/api";
+import { AgentEdge, AgentNode, LLMModel, NodeDebugResult, Paginated, RerankModel, api } from "@/lib/api";
 import { useTranslations } from "next-intl";
-import { ChevronDown, Plus, Trash2, Variable } from "lucide-react";
+import { toast } from "sonner";
+import { ChevronDown, Copy, Loader2, Play, Plus, Trash2, Variable } from "lucide-react";
 
 const NODE_TYPE_KEY: Record<string, string> = {
   retrieval: "node_retrieval",
@@ -12,6 +13,7 @@ const NODE_TYPE_KEY: Record<string, string> = {
   message: "node_message",
   condition: "node_condition",
   classifier: "node_classifier",
+  note: "node_note",
 };
 
 // Outputs each node type publishes to the variable table. Keys mirror the
@@ -40,6 +42,7 @@ export function AgentConfigPanel({
   onSuggestedQuestionsChange,
   allNodes,
   allEdges,
+  kbId,
 }: {
   node: AgentNode | null;
   edge: AgentEdge | null;
@@ -53,8 +56,12 @@ export function AgentConfigPanel({
   onSuggestedQuestionsChange: (v: string[]) => void;
   allNodes: AgentNode[];
   allEdges: AgentEdge[];
+  kbId?: string;
 }) {
   const t = useTranslations();
+  // Test query shared across nodes: debugging a flow means running the same
+  // question through node after node, so it survives node switches.
+  const [debugQuery, setDebugQuery] = useState("");
   const { data: llmsData } = useSWR<Paginated<LLMModel>>("llm-list", () =>
     api.listLLMs(1, 50)
   );
@@ -78,6 +85,11 @@ export function AgentConfigPanel({
           ) : null}
         </div>
         {renderEditor(node, (patch) => onChange(node.id, { ...node.data, ...patch }), t, llms, reranks, allNodes, allEdges)}
+        {/* Single-node debug: run the selected node in isolation. Notes are
+            display-only and never execute, so they skip this section. */}
+        {kbId && node.type !== "note" && (
+          <NodeDebugSection key={node.id} kbId={kbId} node={node} query={debugQuery} onQueryChange={setDebugQuery} />
+        )}
       </div>
     );
   }
@@ -190,6 +202,16 @@ function renderEditor(
   allEdges: AgentEdge[],
 ) {
   switch (node.type) {
+    case "note":
+      return (
+        <Field label={t("agent.note_edit_hint")}>
+          <TextArea
+            value={String(node.data.text || "")}
+            onChange={(v) => patch({ text: v })}
+            rows={5}
+          />
+        </Field>
+      );
     case "retrieval":
       return (
         <>
@@ -424,6 +446,136 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-xs text-muted-foreground">{label}</span>
       {children}
     </label>
+  );
+}
+
+// NodeDebugSection runs the selected node in isolation against a test query.
+// The query lives in the parent so it survives node switches; results reset
+// per node via the key set at the call site.
+function NodeDebugSection({
+  kbId,
+  node,
+  query,
+  onQueryChange,
+}: {
+  kbId: string;
+  node: AgentNode;
+  query: string;
+  onQueryChange: (v: string) => void;
+}) {
+  const t = useTranslations();
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<NodeDebugResult | null>(null);
+
+  async function run() {
+    const q = query.trim();
+    if (!q) {
+      toast(t("agent.debug_no_query"));
+      return;
+    }
+    setRunning(true);
+    setResult(null);
+    try {
+      const res = await api.debugAgentNode(kbId, node, q);
+      setResult(res);
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="border-t pt-3 space-y-2">
+      <div className="text-sm font-medium">{t("agent.test_node")}</div>
+      {/* min-w-0 lets the input shrink below its typed value's intrinsic
+          width — long test queries used to stretch the panel and cause a
+          horizontal scrollbar. */}
+      <div className="flex gap-2 min-w-0">
+        <input
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              run();
+            }
+          }}
+          placeholder={t("agent.debug_query_placeholder")}
+          className="flex-1 min-w-0 rounded-md border border-border bg-background px-2 py-1 text-sm"
+        />
+        <button
+          onClick={run}
+          disabled={running}
+          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50 transition-colors"
+        >
+          {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+          {t("agent.debug_run")}
+        </button>
+      </div>
+      {result && (
+        <div className="rounded-md border bg-muted/30 p-2 text-xs space-y-2 overflow-hidden">
+          <div className="flex items-center gap-1.5 text-muted-foreground flex-wrap">
+            <span className="inline-flex items-center rounded bg-background px-1.5 py-0.5 border">
+              {result.duration_ms != null ? `${result.duration_ms}ms` : ""}
+            </span>
+            {result.type === "retrieval" && (
+              <span className="inline-flex items-center rounded bg-background px-1.5 py-0.5 border">
+                {t("agent.debug_hits", { count: result.hits ?? 0 })}
+              </span>
+            )}
+            {result.type === "retrieval" && result.top_score ? (
+              <span className="inline-flex items-center rounded bg-background px-1.5 py-0.5 border">
+                {t("agent.var_top_score")} {result.top_score.toFixed(3)}
+              </span>
+            ) : null}
+          </div>
+          {/* Variables this node would expose downstream, keyed exactly as
+              prompts/conditions reference them. Key and value sit on separate
+              lines — side-by-side squeezes both in this narrow panel. Click
+              a row to copy the key for pasting into a downstream node. */}
+          {result.variables && Object.keys(result.variables).length > 0 && (
+            <div className="space-y-1">
+              <div className="text-muted-foreground">{t("agent.debug_vars")}</div>
+              <div className="rounded-md border divide-y overflow-hidden">
+                {Object.entries(result.variables).map(([k, v]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    title={t("agent.debug_copy_var")}
+                    onClick={() => {
+                      navigator.clipboard.writeText(k);
+                      toast(t("agent.debug_var_copied"));
+                    }}
+                    className="w-full text-left px-2 py-1.5 hover:bg-accent/50 transition-colors group"
+                  >
+                    <div className="flex items-center gap-1 min-w-0">
+                      <code className="min-w-0 truncate font-mono text-[11px] text-primary/90">{k}</code>
+                      <Copy className="ml-auto shrink-0 h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <div className="mt-0.5 break-words text-foreground/80">{v}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="max-h-48 overflow-y-auto space-y-1.5 min-w-0">
+            {(result.type === "retrieval" ? result.context : result.text)
+              ?.split(/\n\n+/)
+              .map((seg) => seg.trim())
+              .filter(Boolean)
+              .map((seg, i) => (
+                <p
+                  key={i}
+                  className="whitespace-pre-wrap break-words min-w-0 text-foreground/80 bg-background rounded border px-2 py-1.5"
+                >
+                  {seg}
+                </p>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

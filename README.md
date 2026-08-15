@@ -37,12 +37,12 @@ ollmo converges everything into three steps: **upload documents, ask questions, 
 
 ## Features
 
-- **Hybrid Retrieval** — Dense vectors on Milvus + lexical matching via MySQL FULLTEXT, fused with RRF, with KB-level rerank configuration.
+- **Hybrid Retrieval** — Dense vectors on Milvus + lexical matching via MySQL FULLTEXT, fused with RRF, with KB-level rerank configuration; built-in retrieval testing with an adjustable keyword ↔ semantic weight slider.
 - **Multi-Tenancy** — Logical isolation across MySQL, Milvus, and MinIO; every table carries `tenant_id`.
 - **Document Pipeline** — Upload (drag & drop, paste, multi-file) → parse (MinerU / local parser) → chunk → embed → index, fully async via Asynq + Redis.
 - **Streaming Chat** — Real-time SSE streaming with source citations. Doubao-style greeting from agent opening message.
 - **Auto-Memory** — Long conversations are automatically summarized in the background (async LLM task); summaries are injected into later sessions for cross-conversation continuity. Toggleable site-wide.
-- **Agent Canvas** — Visual agent pipeline (React Flow): intent classification → retrieval → condition branch → LLM → direct reply. Per-KB system prompt, temperature, top_k, rerank toggle, opening message, and LLM selection.
+- **Agent Canvas** — Visual agent pipeline (React Flow): intent classification → retrieval → condition branch → LLM → direct reply. Node outputs are referenceable variables (`{node.output}`) in prompts and conditions, enabling LLM chaining and generic branching; per-node debug shows output variables, and nodes highlight live during execution. In-canvas undo/redo and sticky notes. Per-KB system prompt, temperature, top_k, rerank toggle, opening message, and LLM selection.
 - **Ingestion Pipeline Canvas** — Visual ingestion DAG (React Flow): source → parser → chunker → embedder → sink, with configurable parsing options, chunking strategy, and batch size.
 - **GraphRAG** — LLM-powered entity & relation extraction at ingestion; entity matching enriches retrieval context at query time.
 - **Configurable Models** — Tenant-level LLM / Embedding / Rerank provider management via web UI, with per-KB overrides. Selection priority: KB config → tenant default → config.yaml.
