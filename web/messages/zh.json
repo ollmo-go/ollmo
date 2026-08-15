@@ -303,6 +303,7 @@
     "provider_models_title": "模型",
     "provider_models_empty": "暂无模型，可手动添加或获取可用模型",
     "provider_model_id": "模型 ID",
+    "provider_model_id_empty": "请先填写模型 ID",
     "provider_model_name": "显示名",
     "provider_add_model": "添加模型",
     "provider_test_ok": "测试通过：{reply}",

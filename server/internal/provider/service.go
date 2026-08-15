@@ -102,6 +102,65 @@ type ProbeInput struct {
 	ProviderID string `json:"provider_id"`
 }
 
+// ProbeModelInput tests connectivity for a single model using the FORM's
+// current endpoint+key, before the model row is saved. Kind is one of
+// chat/embedding/rerank; it selects which API call proves the model works.
+type ProbeModelInput struct {
+	Kind     string `json:"kind"`
+	Endpoint string `json:"endpoint"`
+	APIKey   string `json:"api_key"`
+	Model    string `json:"model"`
+}
+
+// ProbeModel fires a minimal real request against the given model so the
+// settings drawer can prove an unsaved model works. It never touches the DB;
+// a wrong key or a typo'd model id surfaces as an error the caller shows.
+func (s *Service) ProbeModel(ctx context.Context, tenantID string, in ProbeModelInput) (string, error) {
+	if in.Model == "" {
+		return "", errs.BadRequest("model is required")
+	}
+	if in.Endpoint == "" {
+		return "", errs.BadRequest("endpoint is required")
+	}
+	if err := clients.ValidateEndpoint(in.Endpoint); err != nil {
+		return "", errs.BadRequest(err.Error())
+	}
+	if in.APIKey == "" {
+		return "", errs.BadRequest("api key is required")
+	}
+	switch in.Kind {
+	case modelcatalog.KindChat, "llm":
+		out, err := clients.NewLLM().Chat(ctx, in.Endpoint, in.APIKey, clients.ChatRequest{
+			Model:    in.Model,
+			Messages: []clients.ChatMessage{{Role: "user", Content: "Reply with the single word: ok"}},
+			MaxTokens: 32,
+		})
+		if err != nil {
+			return "", errs.Wrap(errs.CodeBadRequest, "chat model test", err)
+		}
+		return out, nil
+	case modelcatalog.KindEmbedding:
+		vecs, err := clients.NewEmbedding(in.Endpoint, in.APIKey).Embed(ctx, in.Model, []string{"test"})
+		if err != nil {
+			return "", errs.Wrap(errs.CodeBadRequest, "embedding model test", err)
+		}
+		if len(vecs) > 0 {
+			return "ok", nil
+		}
+		return "empty", nil
+	case modelcatalog.KindRerank:
+		out, err := clients.NewRerank(in.Endpoint, in.APIKey).Rerank(ctx, in.Model, "test", []clients.RerankInput{{DocID: "1", Content: "test document"}}, 1)
+		if err != nil {
+			return "", errs.Wrap(errs.CodeBadRequest, "rerank model test", err)
+		}
+		if len(out) > 0 {
+			return "ok", nil
+		}
+		return "empty", nil
+	}
+	return "", errs.BadRequest("invalid model kind: " + in.Kind)
+}
+
 func (s *Service) Catalog() []modelcatalog.ProviderSpec {
 	return modelcatalog.All()
 }

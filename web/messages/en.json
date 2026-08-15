@@ -304,6 +304,7 @@
     "provider_models_title": "Models",
     "provider_models_empty": "No models yet — add one or fetch available models",
     "provider_model_id": "Model ID",
+    "provider_model_id_empty": "Enter a model ID first",
     "provider_model_name": "Display name",
     "provider_add_model": "Add model",
     "provider_test_ok": "Test passed: {reply}",

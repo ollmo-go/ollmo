@@ -81,6 +81,20 @@ func (h *Handler) Probe(c *fiber.Ctx) error {
 	return response.OK(c, fiber.Map{"items": models})
 }
 
+// ProbeModel tests a single unsaved model (form endpoint+key) for
+// connectivity, so the settings drawer can validate a model before saving.
+func (h *Handler) ProbeModel(c *fiber.Ctx) error {
+	var in ProbeModelInput
+	if err := c.BodyParser(&in); err != nil {
+		return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
+	}
+	reply, err := h.svc.ProbeModel(c.Context(), middleware.TenantID(c), in)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	return response.OK(c, fiber.Map{"reply": reply})
+}
+
 func (h *Handler) AddModel(c *fiber.Ctx) error {
 	var in AddModelInput
 	if err := c.BodyParser(&in); err != nil {

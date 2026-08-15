@@ -828,9 +828,43 @@ function ModelListEditor({
   const [candidates, setCandidates] = useState<DiscoveredModel[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [ctxText, setCtxText] = useState<Record<string, string>>({});
+  // Tracks which row is running an unsaved-model connectivity test.
+  const [localTesting, setLocalTesting] = useState<string | null>(null);
 
   function patch(key: string, next: Partial<DraftModel>) {
     onChange(models.map((m) => (m.key === key ? { ...m, ...next } : m)));
+  }
+
+  // Saved rows test via the stored model id (onTest); fresh rows fire a
+  // probe-model call against the form's endpoint+key so a model can be
+  // validated before it is ever saved.
+  async function testRow(m: DraftModel) {
+    if (m.rowId) {
+      onTest?.(m.rowId);
+      return;
+    }
+    if (!m.model.trim()) {
+      toast.error(t("settings.provider_model_id_empty"));
+      return;
+    }
+    if (!probe.endpoint) {
+      toast.error(t("settings.fetch_need_endpoint"));
+      return;
+    }
+    setLocalTesting(m.key);
+    try {
+      await api.providers.probeModel({
+        kind,
+        endpoint: probe.endpoint,
+        api_key: probe.api_key ?? "",
+        model: m.model.trim(),
+      });
+      toast.success(`${m.model.trim()} OK`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setLocalTesting(null);
+    }
   }
 
   async function fetchModels() {
@@ -938,15 +972,20 @@ function ModelListEditor({
               <Star className={cn("h-3.5 w-3.5", m.is_default && "fill-primary text-primary")} />
             </button>
           )}
-          {m.rowId && onTest && (
+          {(m.rowId ? onTest : true) && (
             <button
               type="button"
               className="shrink-0 text-muted-foreground hover:text-primary disabled:opacity-50"
               title={t("settings.test")}
-              disabled={disabled || testing === m.rowId}
-              onClick={() => onTest(m.rowId!)}
+              disabled={disabled || testing === m.rowId || localTesting === m.key}
+              onClick={() => testRow(m)}
             >
-              <Zap className={cn("h-3.5 w-3.5", testing === m.rowId && "animate-pulse")} />
+              <Zap
+                className={cn(
+                  "h-3.5 w-3.5",
+                  (testing === m.rowId || localTesting === m.key) && "animate-pulse"
+                )}
+              />
             </button>
           )}
           <button

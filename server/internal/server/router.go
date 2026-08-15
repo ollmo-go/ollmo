@@ -491,6 +491,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	providerGrp.Delete("/:id", providerHandler.Delete)
 	providerGrp.Post("/:id/discover", providerHandler.Discover)
 	providerGrp.Post("/probe", providerHandler.Probe)
+	providerGrp.Post("/probe-model", providerHandler.ProbeModel)
 	providerGrp.Post("/:id/models/:kind", providerHandler.AddModel)
 	providerGrp.Put("/:id/models/:kind/:mid", providerHandler.UpdateModel)
 	providerGrp.Delete("/:id/models/:kind/:mid", providerHandler.RemoveModel)

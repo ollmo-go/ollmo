@@ -983,6 +983,19 @@ export const api = {
       });
       return r.items ?? [];
     },
+    // ProbeModel tests a single unsaved model (form endpoint+key) for
+    // connectivity, so the settings drawer can validate a model before saving.
+    async probeModel(body: {
+      kind: string;
+      endpoint: string;
+      api_key: string;
+      model: string;
+    }): Promise<{ reply: string }> {
+      return request("/providers/probe-model", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
     async addModel(
       id: string,
       kind: "llm" | "embedding" | "rerank",
