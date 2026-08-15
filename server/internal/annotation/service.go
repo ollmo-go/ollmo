@@ -160,6 +160,12 @@ func (s *Service) Match(ctx context.Context, tenantID, kbID, query string) *Matc
 	if query == "" {
 		return nil
 	}
+	// Short-circuit before any external call: KBs without enabled
+	// annotations are the common case and must not pay for an embedding.
+	has, err := s.repo.HasEnabled(tenantID, kbID)
+	if err != nil || !has {
+		return nil
+	}
 	k, err := s.kbRepo.FindByID(tenantID, kbID)
 	if err != nil || k.EmbeddingModelID == "" {
 		return nil

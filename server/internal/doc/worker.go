@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -370,7 +371,7 @@ func (w *Worker) HandleEmbed(ctx context.Context, t *asynq.Task) error {
 
 	// Embed in batches and upsert as we go so a late failure leaves partial
 	// vectors in Milvus (acceptable; re-running embed is idempotent upsert).
-	vectorIDs := make(map[string]string, len(chunks))
+	embeddedIDs := make([]string, 0, len(chunks))
 	totalUpserted := 0
 	for start := 0; start < len(chunks); start += batchSize {
 		end := start + batchSize
@@ -399,12 +400,14 @@ func (w *Worker) HandleEmbed(ctx context.Context, t *asynq.Task) error {
 				Content:   c.Content,
 				Embedding: vectors[i],
 			}
-			vectorIDs[c.ID] = c.ID
 		}
 		n, err := w.store.Upsert(ctx, p.KbID, records)
 		if err != nil {
 			w.markFailedAndLog(p.TenantID, p.DocID, "milvus upsert: "+err.Error())
 			return fmt.Errorf("upsert batch %d-%d: %w", start, end, err)
+		}
+		for _, c := range batch {
+			embeddedIDs = append(embeddedIDs, c.ID)
 		}
 		totalUpserted += n
 		logf("upserted batch %d-%d (%d vectors)", start, end, n)
@@ -412,8 +415,8 @@ func (w *Worker) HandleEmbed(ctx context.Context, t *asynq.Task) error {
 
 	// Record Milvus primary keys on the chunks. We use chunk.ID as the PK, so
 	// this is mostly a flag that embedding succeeded.
-	if err := w.svc.SetChunkVectorIDs(p.TenantID, p.DocID, vectorIDs); err != nil {
-		logf("warn: set vector ids failed: %v", err)
+	if err := w.svc.MarkChunksEmbedded(p.TenantID, p.DocID, embeddedIDs); err != nil {
+		logf("warn: mark chunks embedded failed: %v", err)
 	}
 
 	if err := w.svc.MarkEmbedded(p.TenantID, p.DocID); err != nil {
@@ -464,15 +467,34 @@ func (w *Worker) HandleExtract(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
-	extracted := 0
+	// Bounded concurrency: extraction is one LLM call per chunk, so serial
+	// processing of a large document dominates ingestion time. Concurrent
+	// chunks may race on merging the same entity (a lost mention count is
+	// acceptable); the parse queue's worker cap bounds total LLM pressure.
+	const extractConcurrency = 4
+	sem := make(chan struct{}, extractConcurrency)
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		extracted int
+	)
 	for _, c := range chunks {
-		if err := w.graphSvc.ExtractFromChunk(ctx, p.TenantID, p.KbID, c.ID, c.Content,
-			provider.Endpoint, provider.APIKey, provider.Model); err != nil {
-			logf("warn: chunk %s extraction failed: %v", c.ID, err)
-			continue
-		}
-		extracted++
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(c *Chunk) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := w.graphSvc.ExtractFromChunk(ctx, p.TenantID, p.KbID, c.ID, c.Content,
+				provider.Endpoint, provider.APIKey, provider.Model); err != nil {
+				logf("warn: chunk %s extraction failed: %v", c.ID, err)
+				return
+			}
+			mu.Lock()
+			extracted++
+			mu.Unlock()
+		}(c)
 	}
+	wg.Wait()
 	logf("done, %d/%d chunks extracted", extracted, len(chunks))
 	return nil
 }

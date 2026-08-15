@@ -18,18 +18,19 @@ func (r *Repo) Create(e *Execution) error {
 }
 
 // List returns executions for a KB, newest first. source filters chat/test
-// runs; empty returns both.
+// runs; empty returns both. Trace is a longtext blob the list view never
+// renders, so it is omitted here — the replay drawer fetches it via Find.
 func (r *Repo) List(tenantID, kbID, source string, page, size int) ([]*Execution, int64, error) {
-	q := r.db.Where("tenant_id = ? AND kb_id = ?", tenantID, kbID)
+	q := r.db.Model(&Execution{}).Where("tenant_id = ? AND kb_id = ?", tenantID, kbID)
 	if source != "" {
 		q = q.Where("source = ?", source)
 	}
 	var total int64
-	if err := q.Model(&Execution{}).Count(&total).Error; err != nil {
+	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var items []*Execution
-	if err := q.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
+	if err := q.Omit("trace").Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil

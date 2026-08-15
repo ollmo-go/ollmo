@@ -6,19 +6,25 @@ import (
 
 	"gorm.io/gorm"
 
+	"ollmo/ollmo/pkg/cache"
 	"ollmo/ollmo/pkg/crypto"
 	"ollmo/ollmo/pkg/errs"
 )
 
+// cfgTTL bounds the cached default provider. Chat resolves the default once
+// or more per turn; writers below invalidate so staleness is short-lived.
+const cfgTTL = 30 * time.Second
+
 type Repo struct {
-	db  *gorm.DB
-	key crypto.EncryptKey
+	db       *gorm.DB
+	key      crypto.EncryptKey
+	defCache *cache.TTL[*LLMModel]
 }
 
 // NewRepo creates a repo. key is optional; when nil API keys are stored and
 // returned as plaintext (useful for tests and local dev without a secret).
 func NewRepo(db *gorm.DB, key crypto.EncryptKey) *Repo {
-	return &Repo{db: db, key: key}
+	return &Repo{db: db, key: key, defCache: cache.NewTTL[*LLMModel](cfgTTL)}
 }
 
 func (r *Repo) Create(p *LLMModel) error {
@@ -29,6 +35,7 @@ func (r *Repo) Create(p *LLMModel) error {
 		return err
 	}
 	p.APIKey = plain
+	r.defCache.Delete(p.TenantID)
 	return nil
 }
 
@@ -46,8 +53,13 @@ func (r *Repo) FindByID(tenantID, id string) (*LLMModel, error) {
 }
 
 // FindDefault returns the tenant's default provider. Used by chat when the
-// caller does not specify one.
+// caller does not specify one. Cached per tenant; every write path below
+// invalidates the entry.
 func (r *Repo) FindDefault(tenantID string) (*LLMModel, error) {
+	if p, ok := r.defCache.Get(tenantID); ok {
+		c := *p // copy so callers may mutate freely
+		return &c, nil
+	}
 	var p LLMModel
 	err := r.db.Where("tenant_id = ? AND is_default = ? AND status = ?",
 		tenantID, true, StatusActive).First(&p).Error
@@ -58,7 +70,9 @@ func (r *Repo) FindDefault(tenantID string) (*LLMModel, error) {
 		return nil, err
 	}
 	p.APIKey = crypto.Decrypt(r.key, p.APIKey)
-	return &p, nil
+	r.defCache.Set(tenantID, &p)
+	c := p
+	return &c, nil
 }
 
 func (r *Repo) List(tenantID string, page, size int) ([]*LLMModel, int64, error) {
@@ -89,15 +103,20 @@ func (r *Repo) Update(p *LLMModel) error {
 		return err
 	}
 	p.APIKey = plain
+	r.defCache.Delete(p.TenantID)
 	return nil
 }
 
 // ClearDefault unsets is_default on every other provider in the tenant. Used
 // when promoting a provider to default so only one is active at a time.
 func (r *Repo) ClearDefault(tenantID, exceptID string) error {
-	return r.db.Model(&LLMModel{}).
+	if err := r.db.Model(&LLMModel{}).
 		Where("tenant_id = ? AND id <> ?", tenantID, exceptID).
-		Update("is_default", false).Error
+		Update("is_default", false).Error; err != nil {
+		return err
+	}
+	r.defCache.Delete(tenantID)
+	return nil
 }
 
 // UpdateTestResult records the last test outcome without touching other
@@ -116,6 +135,7 @@ func (r *Repo) Delete(tenantID, id string) error {
 	if res.Error != nil {
 		return res.Error
 	}
+	r.defCache.Delete(tenantID)
 	if res.RowsAffected == 0 {
 		return errs.NotFound("llm provider not found")
 	}

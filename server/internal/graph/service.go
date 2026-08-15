@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -18,10 +20,32 @@ import (
 type Service struct {
 	repo *Repo
 	llm  *clients.LLMClient
+
+	// entCache memoizes the top entity rows per KB for substring matching in
+	// QueryForRetrieval. Without it every search re-fetched up to 200 rows.
+	mu       sync.RWMutex
+	entCache map[string]entCacheEntry
 }
 
+type entCacheEntry struct {
+	entities []*Entity
+	expires  time.Time
+}
+
+// entCacheTTL trades entity-name freshness for retrieval speed; extraction
+// invalidates the entry after each chunk, so the window is short.
+const entCacheTTL = time.Minute
+
 func NewService(repo *Repo, llm *clients.LLMClient) *Service {
-	return &Service{repo: repo, llm: llm}
+	return &Service{repo: repo, llm: llm, entCache: make(map[string]entCacheEntry)}
+}
+
+func entCacheKey(tenantID, kbID string) string { return tenantID + "|" + kbID }
+
+func (s *Service) invalidateEntities(tenantID, kbID string) {
+	s.mu.Lock()
+	delete(s.entCache, entCacheKey(tenantID, kbID))
+	s.mu.Unlock()
 }
 
 // ExtractFromChunk asks the LLM to extract entities and relations from a chunk
@@ -35,13 +59,85 @@ func (s *Service) ExtractFromChunk(ctx context.Context, tenantID, kbID, chunkID,
 	if result == nil || (len(result.Entities) == 0 && len(result.Relations) == 0) {
 		return nil
 	}
+	return s.persistExtraction(tenantID, kbID, chunkID, result)
+}
 
-	// Persist entities, building a name->id map so relations can resolve.
-	entityIDs := make(map[string]string, len(result.Entities))
+// persistExtraction writes one extraction result. Persistence is batched:
+// one FindByNames resolves every name in the chunk (entities + relation
+// endpoints) against the KB entity table, existing rows are merged in memory
+// and saved, new entities (including stubs for endpoint names extracted from
+// other chunks) are inserted in one batch, and relations are inserted in one
+// batch. This replaces the former per-entity select+save+re-read pattern,
+// which cost ~50 statements per chunk.
+func (s *Service) persistExtraction(tenantID, kbID, chunkID string, result *ExtractionResult) error {
+
+	// Collect every name the chunk mentions (entity list + relation endpoints).
+	names := map[string]bool{}
+	for _, e := range result.Entities {
+		if n := strings.TrimSpace(e.Name); n != "" {
+			names[n] = true
+		}
+	}
+	for _, rel := range result.Relations {
+		if n := strings.TrimSpace(rel.Source); n != "" {
+			names[n] = true
+		}
+		if n := strings.TrimSpace(rel.Target); n != "" {
+			names[n] = true
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	nameList := make([]string, 0, len(names))
+	for n := range names {
+		nameList = append(nameList, n)
+	}
+
+	// One batched lookup against the KB-wide entity table. Names are matched
+	// case-insensitively (MySQL default collation), like the old upsert.
+	existing, err := s.repo.FindByNames(tenantID, kbID, nameList)
+	if err != nil {
+		return errs.Wrap(errs.CodeInternal, "resolve entities", err)
+	}
+	byLower := make(map[string]*Entity, len(existing))
+	for _, e := range existing {
+		key := strings.ToLower(e.Name)
+		if _, ok := byLower[key]; !ok { // FindByNames orders by mention_count DESC
+			byLower[key] = e
+		}
+	}
+
+	// name -> entity id, filled for every name in the chunk.
+	entityIDs := make(map[string]string, len(names))
+	var toCreate []*Entity
+
+	// Merge extracted entities into existing rows (in memory, saved once).
+	merged := make(map[string]*Entity)
 	for _, e := range result.Entities {
 		name := strings.TrimSpace(e.Name)
 		if name == "" {
 			continue
+		}
+		if cur := byLower[strings.ToLower(name)]; cur != nil {
+			entityIDs[name] = cur.ID
+			m, ok := merged[cur.ID]
+			if !ok {
+				m = cur
+				merged[cur.ID] = cur
+			}
+			m.MentionCount++
+			if e.Description != "" && m.Description == "" {
+				m.Description = e.Description
+			}
+			if e.Type != "" && m.Type == "" {
+				m.Type = e.Type
+			}
+			m.SourceChunkIDs = mergeChunkIDs(m.SourceChunkIDs, chunkID)
+			continue
+		}
+		if _, ok := entityIDs[name]; ok {
+			continue // duplicate name in the same extraction
 		}
 		ent := &Entity{
 			ID:             uuid.NewString(),
@@ -53,75 +149,64 @@ func (s *Service) ExtractFromChunk(ctx context.Context, tenantID, kbID, chunkID,
 			SourceChunkIDs: chunkID,
 			MentionCount:   1,
 		}
-		if err := s.repo.UpsertEntity(ent); err != nil {
-			return errs.Wrap(errs.CodeInternal, "upsert entity", err)
+		toCreate = append(toCreate, ent)
+		entityIDs[name] = ent.ID
+	}
+
+	// Relation endpoints: resolve from local ids, then the KB table, and as a
+	// last resort create a stub so edges between entities extracted from
+	// DIFFERENT chunks survive; future chunks enrich stubs via the merge above.
+	for _, rel := range result.Relations {
+		for _, raw := range []string{rel.Source, rel.Target} {
+			name := strings.TrimSpace(raw)
+			if name == "" {
+				continue
+			}
+			if _, ok := entityIDs[name]; ok {
+				continue
+			}
+			if cur := byLower[strings.ToLower(name)]; cur != nil {
+				entityIDs[name] = cur.ID
+				continue
+			}
+			stub := &Entity{
+				ID:             uuid.NewString(),
+				TenantID:       tenantID,
+				KbID:           kbID,
+				Name:           name,
+				SourceChunkIDs: chunkID,
+				MentionCount:   1,
+			}
+			toCreate = append(toCreate, stub)
+			entityIDs[name] = stub.ID
 		}
-		// Re-read to get the canonical id after merge.
-		entities, _ := s.repo.FindByNames(tenantID, kbID, []string{name})
-		if len(entities) > 0 {
-			entityIDs[name] = entities[0].ID
+	}
+
+	if len(toCreate) > 0 {
+		if err := s.repo.CreateEntities(toCreate); err != nil {
+			return errs.Wrap(errs.CodeInternal, "create entities", err)
+		}
+	}
+	for _, m := range merged {
+		if err := s.repo.SaveEntity(m); err != nil {
+			return errs.Wrap(errs.CodeInternal, "merge entity", err)
 		}
 	}
 
-	// Persist relations, resolving source/target names to entity ids.
-	// Endpoints are looked up locally first, then against the KB-wide entity
-	// table so edges between entities extracted from DIFFERENT chunks are
-	// kept; see resolveEntityID. Without the global lookup the graph
-	// degenerated into per-chunk stars and cross-chunk knowledge links were
-	// silently dropped.
-	if err := s.persistRelations(tenantID, kbID, chunkID, result.Relations, entityIDs); err != nil {
-		return err
-	}
-	return nil
-}
-
-// resolveEntityID maps a relation endpoint name to an entity id. Local names
-// (extracted from the current chunk) win; otherwise the KB-wide entity table
-// is consulted (entity extracted from another chunk); as a last resort a stub
-// entity is created so the edge survives and future chunks enrich it via
-// UpsertEntity merging.
-func (s *Service) resolveEntityID(tenantID, kbID, chunkID, name string, local map[string]string) string {
-	if id, ok := local[name]; ok {
-		return id
-	}
-	if entities, err := s.repo.FindByNames(tenantID, kbID, []string{name}); err == nil && len(entities) > 0 {
-		return entities[0].ID
-	}
-	if err := s.repo.UpsertEntity(&Entity{
-		ID:             uuid.NewString(),
-		TenantID:       tenantID,
-		KbID:           kbID,
-		Name:           name,
-		SourceChunkIDs: chunkID,
-		MentionCount:   1,
-	}); err != nil {
-		return ""
-	}
-	entities, err := s.repo.FindByNames(tenantID, kbID, []string{name})
-	if err != nil || len(entities) == 0 {
-		return ""
-	}
-	return entities[0].ID
-}
-
-// persistRelations creates relation rows for the extraction result, resolving
-// endpoint names to entity ids via resolveEntityID.
-func (s *Service) persistRelations(tenantID, kbID, chunkID string, relations []ExtractedRelation, local map[string]string) error {
-	for _, rel := range relations {
+	// Relations: build rows against resolved ids and insert in one batch.
+	rels := make([]*Relation, 0, len(result.Relations))
+	for _, rel := range result.Relations {
 		src := strings.TrimSpace(rel.Source)
 		tgt := strings.TrimSpace(rel.Target)
 		if src == "" || tgt == "" {
 			continue
 		}
-		srcID := s.resolveEntityID(tenantID, kbID, chunkID, src, local)
-		if srcID == "" {
+		srcID, ok1 := entityIDs[src]
+		tgtID, ok2 := entityIDs[tgt]
+		if !ok1 || !ok2 {
 			continue
 		}
-		tgtID := s.resolveEntityID(tenantID, kbID, chunkID, tgt, local)
-		if tgtID == "" {
-			continue
-		}
-		r := &Relation{
+		rels = append(rels, &Relation{
 			ID:             uuid.NewString(),
 			TenantID:       tenantID,
 			KbID:           kbID,
@@ -129,11 +214,14 @@ func (s *Service) persistRelations(tenantID, kbID, chunkID string, relations []E
 			TargetEntityID: tgtID,
 			RelationType:   rel.Type,
 			Description:    rel.Description,
-		}
-		if err := s.repo.CreateRelation(r); err != nil {
-			return errs.Wrap(errs.CodeInternal, "create relation", err)
+		})
+	}
+	if len(rels) > 0 {
+		if err := s.repo.CreateRelations(rels); err != nil {
+			return errs.Wrap(errs.CodeInternal, "create relations", err)
 		}
 	}
+	s.invalidateEntities(tenantID, kbID)
 	return nil
 }
 
@@ -180,13 +268,24 @@ func (s *Service) QueryForRetrieval(ctx context.Context, tenantID, kbID, query s
 	if s.repo == nil {
 		return "", nil
 	}
+	key := entCacheKey(tenantID, kbID)
+	s.mu.RLock()
+	e, cached := s.entCache[key]
+	s.mu.RUnlock()
+	if !cached || time.Now().After(e.expires) {
+		all, _, err := s.repo.ListEntities(tenantID, kbID, 1, 200)
+		if err != nil || len(all) == 0 {
+			return "", nil
+		}
+		e = entCacheEntry{entities: all, expires: time.Now().Add(entCacheTTL)}
+		s.mu.Lock()
+		s.entCache[key] = e
+		s.mu.Unlock()
+	}
+	all := e.entities
 	// Match entities whose name appears in the query. Simple substring match
 	// avoids an extra LLM call per retrieval; an LLM-based entity linker can
 	// be added later for fuzzy matches.
-	all, _, err := s.repo.ListEntities(tenantID, kbID, 1, 200)
-	if err != nil || len(all) == 0 {
-		return "", nil
-	}
 	q := strings.ToLower(query)
 	var matched []*Entity
 	for _, e := range all {
@@ -236,7 +335,11 @@ func (s *Service) ListEntities(tenantID, kbID string, page, size int) ([]*Entity
 }
 
 func (s *Service) DeleteByKB(tenantID, kbID string) error {
-	return s.repo.DeleteByKB(tenantID, kbID)
+	if err := s.repo.DeleteByKB(tenantID, kbID); err != nil {
+		return err
+	}
+	s.invalidateEntities(tenantID, kbID)
+	return nil
 }
 
 func truncate(s string, n int) string {

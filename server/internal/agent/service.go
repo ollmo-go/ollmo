@@ -4,34 +4,89 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
 	"ollmo/ollmo/pkg/errs"
 )
 
+// defCacheTTL bounds how long a parsed definition is reused without hitting
+// the DB. One chat turn reads the same agent row several times (execution
+// config extraction + graph walk), so a short TTL removes the duplicate
+// load; Save invalidates immediately.
+const defCacheTTL = 30 * time.Second
+
 // Service handles agent definition CRUD and config extraction. The chat
 // service calls ExtractConfig to get the customized retrieval and generation
 // parameters; the canvas calls Get/Save to manage the definition.
 type Service struct {
 	repo *Repo
+
+	mu   sync.RWMutex
+	defs map[string]defEntry
+}
+
+type defEntry struct {
+	agent   *Agent      // shared read-only snapshot
+	def     *Definition // parsed view; nil when the row has no valid definition
+	expires time.Time
 }
 
 func NewService(repo *Repo) *Service {
-	return &Service{repo: repo}
+	return &Service{repo: repo, defs: make(map[string]defEntry)}
 }
+
+func cacheKey(tenantID, kbID string) string { return tenantID + "|" + kbID }
 
 // Get returns the agent for a KB. If no agent exists yet, a default one is
 // seeded so the canvas always opens with a valid graph.
 func (s *Service) Get(ctx context.Context, tenantID, kbID string) (*Agent, error) {
-	existing, err := s.repo.FindByKB(tenantID, kbID)
+	a, _, err := s.GetDefinition(ctx, tenantID, kbID)
+	return a, err
+}
+
+// GetDefinition returns the agent row and its parsed definition in one call,
+// backed by a per-(tenant, kb) TTL cache. The returned Definition is shared
+// and must be treated as read-only; the Agent is a fresh shallow copy.
+func (s *Service) GetDefinition(ctx context.Context, tenantID, kbID string) (*Agent, *Definition, error) {
+	key := cacheKey(tenantID, kbID)
+	s.mu.RLock()
+	e, ok := s.defs[key]
+	s.mu.RUnlock()
+	if ok && time.Now().Before(e.expires) {
+		return cloneAgent(e.agent), e.def, nil
+	}
+
+	a, err := s.repo.FindByKB(tenantID, kbID)
 	if err != nil {
-		return nil, errs.Wrap(errs.CodeInternal, "find agent", err)
+		return nil, nil, errs.Wrap(errs.CodeInternal, "find agent", err)
 	}
-	if existing != nil {
-		return existing, nil
+	if a == nil {
+		a, err = s.seedDefault(tenantID, kbID)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	return s.seedDefault(tenantID, kbID)
+	var def *Definition
+	if a.Definition != "" {
+		var d Definition
+		if err := json.Unmarshal([]byte(a.Definition), &d); err == nil && len(d.Nodes) > 0 {
+			def = &d
+		}
+	}
+	s.mu.Lock()
+	s.defs[key] = defEntry{agent: a, def: def, expires: time.Now().Add(defCacheTTL)}
+	s.mu.Unlock()
+	return cloneAgent(a), def, nil
+}
+
+// cloneAgent returns a shallow copy; Agent holds only scalar fields, so a
+// copy is enough to keep callers from mutating the cached row.
+func cloneAgent(a *Agent) *Agent {
+	c := *a
+	return &c
 }
 
 // Save replaces the agent definition. A new row is created if none exists;
@@ -61,6 +116,7 @@ func (s *Service) Save(ctx context.Context, tenantID, kbID string, def Definitio
 		if err := s.repo.Create(a); err != nil {
 			return nil, errs.Wrap(errs.CodeInternal, "create agent", err)
 		}
+		s.invalidate(tenantID, kbID)
 		return a, nil
 	}
 	existing.Definition = string(raw)
@@ -68,7 +124,15 @@ func (s *Service) Save(ctx context.Context, tenantID, kbID string, def Definitio
 	if err := s.repo.Update(existing); err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, "update agent", err)
 	}
+	s.invalidate(tenantID, kbID)
 	return existing, nil
+}
+
+// invalidate drops the cached definition so the next read sees the new row.
+func (s *Service) invalidate(tenantID, kbID string) {
+	s.mu.Lock()
+	delete(s.defs, cacheKey(tenantID, kbID))
+	s.mu.Unlock()
 }
 
 // ExtractConfig derives the flat ExecutionConfig from the agent definition.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync"
 
 	"ollmo/ollmo/internal/doc"
 	"ollmo/ollmo/internal/embedding"
@@ -32,6 +33,62 @@ type Service struct {
 
 func NewService(kbRepo *kb.Repo, docRepo *doc.Repo, embedder embedding.Embedder, store *vector.Store, reranker rerank.Reranker, graphSvc *graph.Service) *Service {
 	return &Service{kbRepo: kbRepo, docRepo: docRepo, embedder: embedder, store: store, reranker: reranker, graphSvc: graphSvc}
+}
+
+// denseSearch runs the vector leg: embed the query, search Milvus, then
+// filter disabled documents and metadata in Go (Milvus rows carry neither).
+func (s *Service) denseSearch(ctx context.Context, tenantID, kbID string, req SearchRequest) ([]vector.SearchHit, error) {
+	// Embed query. The KB pins the embedding model by id; resolve it to the
+	// model name the embedder expects.
+	kbCfg, err := s.kbRepo.FindByID(tenantID, kbID)
+	if err != nil {
+		return nil, err
+	}
+	model, _, err := s.embedder.ResolveModel(ctx, tenantID, kbCfg.EmbeddingModelID)
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, "resolve embedding model", err)
+	}
+	vectors, err := s.embedder.Embed(ctx, tenantID, model, []string{req.Query})
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, "embed query", err)
+	}
+	if len(vectors) == 0 {
+		return nil, errs.Internal("empty embedding for query")
+	}
+
+	denseHits, err := s.store.Search(ctx, kbID, tenantID, vectors[0], req.TopK*2)
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, "dense search", err)
+	}
+
+	// Exclude chunks belonging to disabled documents. The sparse leg handles
+	// this via SQL JOIN; for dense we filter in Go because Milvus metadata
+	// does not carry the enabled flag.
+	disabledIDs, dErr := s.docRepo.ListDisabledDocIDs(tenantID, kbID)
+	if dErr != nil {
+		log.Printf("[search] list disabled docs failed tenant=%s kb=%s: %v", tenantID, kbID, dErr)
+	}
+	if len(disabledIDs) > 0 {
+		disabledSet := make(map[string]bool, len(disabledIDs))
+		for _, id := range disabledIDs {
+			disabledSet[id] = true
+		}
+		filtered := denseHits[:0]
+		for _, h := range denseHits {
+			if !disabledSet[h.DocID] {
+				filtered = append(filtered, h)
+			}
+		}
+		denseHits = filtered
+	}
+
+	// Metadata filters: Milvus rows carry no document metadata, so dense
+	// hits are filtered in Go against the doc metadata map. The sparse
+	// leg applies the same filters in SQL.
+	if len(req.Filters) > 0 {
+		denseHits = s.filterDenseByMeta(tenantID, kbID, denseHits, req.Filters)
+	}
+	return denseHits, nil
 }
 
 // MaxTopK caps retrieval breadth for every caller (chat, agent nodes,
@@ -75,61 +132,34 @@ func (s *Service) Search(ctx context.Context, tenantID, kbID string, req SearchR
 	// fall back to sparse-only retrieval rather than erroring.
 	hasEmbedding := kbCfg.EmbeddingModelID != ""
 
-	var denseHits []vector.SearchHit
+	// Run the dense and sparse legs in parallel: neither depends on the
+	// other's output and the embedding call dominates dense latency. Errors
+	// keep their original severity — dense is fatal, sparse falls back to
+	// dense-only retrieval.
+	var (
+		wg         sync.WaitGroup
+		denseErr   error
+		denseHits  []vector.SearchHit
+		sparseHits []vector.SearchHit
+	)
 	if hasEmbedding {
-		// 1. embed query. The KB pins the embedding model by id; resolve it to
-		// the model name the embedder expects.
-		model, _, err := s.embedder.ResolveModel(ctx, tenantID, kbCfg.EmbeddingModelID)
-		if err != nil {
-			return nil, errs.Wrap(errs.CodeInternal, "resolve embedding model", err)
-		}
-		vectors, err := s.embedder.Embed(ctx, tenantID, model, []string{req.Query})
-		if err != nil {
-			return nil, errs.Wrap(errs.CodeInternal, "embed query", err)
-		}
-		if len(vectors) == 0 {
-			return nil, errs.Internal("empty embedding for query")
-		}
-
-		// 2. dense search on Milvus
-		denseHits, err = s.store.Search(ctx, kbID, tenantID, vectors[0], req.TopK*2)
-		if err != nil {
-			return nil, errs.Wrap(errs.CodeInternal, "dense search", err)
-		}
-
-		// Exclude chunks belonging to disabled documents. The sparse leg handles
-		// this via SQL JOIN; for dense we filter in Go because Milvus metadata
-		// does not carry the enabled flag.
-		disabledIDs, dErr := s.docRepo.ListDisabledDocIDs(tenantID, kbID)
-		if dErr != nil {
-			log.Printf("[search] list disabled docs failed tenant=%s kb=%s: %v", tenantID, kbID, dErr)
-		}
-		if len(disabledIDs) > 0 {
-			disabledSet := make(map[string]bool, len(disabledIDs))
-			for _, id := range disabledIDs {
-				disabledSet[id] = true
-			}
-			filtered := denseHits[:0]
-			for _, h := range denseHits {
-				if !disabledSet[h.DocID] {
-					filtered = append(filtered, h)
-				}
-			}
-			denseHits = filtered
-		}
-
-		// Metadata filters: Milvus rows carry no document metadata, so dense
-		// hits are filtered in Go against the doc metadata map. The sparse
-		// leg applies the same filters in SQL.
-		if len(req.Filters) > 0 {
-			denseHits = s.filterDenseByMeta(tenantID, kbID, denseHits, req.Filters)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			denseHits, denseErr = s.denseSearch(ctx, tenantID, kbID, req)
+		}()
 	}
-
-	// 3. lexical search via MySQL FULLTEXT on chunk content. Non-fatal:
-	// if the index is missing or the query has no matches, we fall back to
-	// dense-only retrieval so the search still returns results.
-	sparseHits, _ := s.docRepo.SparseSearch(ctx, tenantID, kbID, req.Query, req.TopK*2, req.Filters)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Lexical search via MySQL FULLTEXT on chunk content. Non-fatal:
+		// a missing index or an empty match degrades to dense-only.
+		sparseHits, _ = s.docRepo.SparseSearch(ctx, tenantID, kbID, req.Query, req.TopK*2, req.Filters)
+	}()
+	wg.Wait()
+	if denseErr != nil {
+		return nil, denseErr
+	}
 
 	// 4. RRF fusion across rank lists. VectorWeight (0..1) biases the fusion
 	// towards the dense leg; nil keeps the equal-weight default.

@@ -25,9 +25,9 @@ type Conversation struct {
 // []Citation stored as a string; it is empty for non-assistant messages.
 type Message struct {
 	ID               string `gorm:"primaryKey;size:36" json:"id"`
-	TenantID         string `gorm:"size:36;index:idx_msg_tenant_conv_created,priority:1;not null" json:"tenant_id"`
+	TenantID         string `gorm:"size:36;index:idx_msg_tenant_conv_created,priority:1;index:idx_msg_tenant_role_vote,priority:1;not null" json:"tenant_id"`
 	ConversationID   string `gorm:"size:36;index:idx_msg_tenant_conv_created,priority:2;not null" json:"conversation_id"`
-	Role             string `gorm:"size:32;not null" json:"role"`
+	Role             string `gorm:"size:32;not null;index:idx_msg_tenant_role_vote,priority:2" json:"role"`
 	Content          string `gorm:"type:text" json:"content"`
 	Reasoning        string `gorm:"type:text" json:"reasoning,omitempty"`
 	Citations        string `gorm:"type:text" json:"citations,omitempty"`
@@ -38,8 +38,10 @@ type Message struct {
 	CompletionTokens int    `gorm:"default:0" json:"completion_tokens,omitempty"`
 	TotalTokens      int    `gorm:"default:0" json:"total_tokens,omitempty"`
 	// Vote is the user's feedback on an assistant message: "", "up", or
-	// "down". Downvotes surface in analytics for bad-case review.
-	Vote string `gorm:"size:8;not null;default:''" json:"vote,omitempty"`
+	// "down". Downvotes surface in analytics for bad-case review. Indexed
+	// with (tenant_id, role) because the feedback list filters on
+	// role='assistant' AND vote<>'' across the whole tenant.
+	Vote string `gorm:"size:8;not null;default:'';index:idx_msg_tenant_role_vote,priority:3" json:"vote,omitempty"`
 	// FollowUps stores LLM-generated follow-up suggestions for this
 	// assistant message as a JSON string array, rendered as clickable chips.
 	FollowUps string    `gorm:"type:text" json:"follow_ups,omitempty"`

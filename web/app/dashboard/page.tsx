@@ -56,17 +56,20 @@ function quotaBarColor(pct: number) {
 
 export default function DashboardHome() {
   const t = useTranslations();
+  // All list keys are shared with their real pages (same fetchers) so SWR
+  // caches one copy: navigating between dashboard and those pages reuses the
+  // data instead of re-fetching under a second "-dashboard" key.
   const { data: kbData, isLoading: kbLoading } = useSWR<Paginated<KnowledgeBase>>(
-    "kb-list-dashboard",
-    () => api.listKBs(1, 1)
+    "kb-list",
+    () => api.listKBs(1, 50)
   );
   const { data: llmData, isLoading: llmLoading } = useSWR<Paginated<LLMModel>>(
-    "llm-list-dashboard",
-    () => api.listLLMs(1, 1)
+    "llm-list",
+    () => api.listLLMs(1, 50)
   );
-  const { data: embedData } = useSWR("embed-list-dashboard", () => api.listEmbeddings(1, 1));
-  const { data: rerankData } = useSWR("rerank-list-dashboard", () => api.listReranks(1, 1));
-  const { data: quota } = useSWR("quota-dashboard", () => api.getQuota());
+  const { data: embedData } = useSWR("embedding-list", () => api.listEmbeddings(1, 50));
+  const { data: rerankData } = useSWR("rerank-list", () => api.listReranks(1, 50));
+  const { data: quota } = useSWR("tenant-quota", () => api.getQuota());
 
   const hasKB = (kbData?.total ?? 0) > 0;
   const hasLLM = (llmData?.total ?? 0) > 0;

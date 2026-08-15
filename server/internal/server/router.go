@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"strings"
 	"time"
@@ -486,29 +485,24 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	memorySvc := memory.NewService(memory.NewRepo(deps.DB), chat.NewRepo(deps.DB), llmRepo, deps.LLM).
 		WithAsynq(deps.Asynq)
 	memoryHandler := memory.NewHandler(memorySvc)
+	// Both closures hit GetDefinition, which caches the parsed definition per
+	// (tenant, kb): one chat turn needs the same agent row twice (execution
+	// config extraction + graph walk) and pays only one DB read + unmarshal.
 	chatSvc := chat.NewService(chat.NewRepo(deps.DB), searchSvc, llmRepo, deps.LLM).
 		WithAgentConfig(func(ctx context.Context, tenantID, kbID string) (*agent.ExecutionConfig, error) {
-			a, err := agentSvc.Get(ctx, tenantID, kbID)
-			if err != nil || a == nil {
+			_, def, err := agentSvc.GetDefinition(ctx, tenantID, kbID)
+			if err != nil || def == nil {
 				return nil, nil
 			}
-			var def agent.Definition
-			if err := json.Unmarshal([]byte(a.Definition), &def); err != nil {
-				return nil, nil
-			}
-			cfg := agent.ExtractConfig(&def)
+			cfg := agent.ExtractConfig(def)
 			return &cfg, nil
 		}).
 		WithAgentDefinition(func(ctx context.Context, tenantID, kbID string) (*agent.Definition, error) {
-			a, err := agentSvc.Get(ctx, tenantID, kbID)
-			if err != nil || a == nil {
+			_, def, err := agentSvc.GetDefinition(ctx, tenantID, kbID)
+			if err != nil || def == nil {
 				return nil, nil
 			}
-			var def agent.Definition
-			if err := json.Unmarshal([]byte(a.Definition), &def); err != nil {
-				return nil, nil
-			}
-			return &def, nil
+			return def, nil
 		}).
 		WithMemoryContext(func(ctx context.Context, tenantID, userID, kbID string) (string, error) {
 			return memorySvc.BuildContext(ctx, tenantID, userID, kbID, 5)

@@ -633,8 +633,8 @@ func (s *Service) EnqueueExtract(ctx context.Context, tenantID, kbID, docID stri
 	return nil
 }
 
-func (s *Service) SetChunkVectorIDs(tenantID, docID string, vectorIDs map[string]string) error {
-	return s.repo.SetDocVectorIDs(tenantID, docID, vectorIDs)
+func (s *Service) MarkChunksEmbedded(tenantID, docID string, chunkIDs []string) error {
+	return s.repo.MarkChunksEmbedded(tenantID, docID, chunkIDs)
 }
 
 // WithTx clones the service with a tx-bound repo. Used when the caller needs

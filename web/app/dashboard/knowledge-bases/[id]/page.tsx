@@ -18,6 +18,13 @@ import { useConfirm } from "@/components/ui/confirm";
 import { cn, formatSize } from "@/lib/utils";
 import { decodeToken, getToken } from "@/lib/auth";
 
+// In-flight document statuses: anything not ready/failed may still transition.
+// One list drives both the SSE subscription and SWR's refreshInterval so the
+// live stream and the polling fallback always agree on "pending".
+const IN_FLIGHT = ["uploaded", "queued", "parsing", "parsed", "embedding"];
+const hasInFlight = (items?: Document[]) =>
+  (items ?? []).some((d) => IN_FLIGHT.includes(d.status));
+
 const STATUS_COLOR: Record<string, string> = {
   uploaded: "bg-muted text-muted-foreground",
   queued: "bg-blue-100 text-blue-700",
@@ -36,7 +43,9 @@ export default function KBDetailPage() {
   const confirm = useConfirm();
 
   const { data: kb, mutate: mutateKB } = useSWR<KnowledgeBase>(`kb-${kbId}`, () => api.getKB(kbId));
-  const { data: embedData } = useSWR<Paginated<EmbeddingModel>>(`embed-${kbId}`, () => api.listEmbeddings(1, 50));
+  // Shared key with the KB list page and edit drawer (same fetcher) so the
+  // embedding list is fetched once and reused across navigation.
+  const { data: embedData } = useSWR<Paginated<EmbeddingModel>>("embedding-list", () => api.listEmbeddings(1, 50));
   const embedNameById = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of embedData?.items ?? []) m.set(p.id, p.model);
@@ -46,12 +55,7 @@ export default function KBDetailPage() {
     `docs-${kbId}`,
     () => api.listDocs(kbId, 1, 50),
     {
-      refreshInterval: (data) =>
-        (data?.items || []).some((d) =>
-          ["queued", "parsing", "parsed", "embedding", "uploaded"].includes(d.status)
-        )
-          ? 15000
-          : 0,
+      refreshInterval: (data) => (hasInFlight(data?.items) ? 15000 : 0),
     }
   );
 
@@ -107,17 +111,13 @@ export default function KBDetailPage() {
   );
 
   // Subscribe to /documents/events while any document is still in flight
-  // (queued / parsing / embedding). The project authenticates with a Bearer
-  // token in the Authorization header, so we use fetch streaming (via
-  // api.streamDocEvents) instead of the native EventSource, which cannot set
-  // custom headers. Reconnects automatically on error with a backoff.
-  const hasPendingDocs = useMemo(
-    () =>
-      (docsPage?.items ?? []).some((d) =>
-        ["queued", "parsing", "embedding"].includes(d.status)
-      ),
-    [docsPage?.items]
-  );
+  // (uploaded / queued / parsing / parsed / embedding). The project
+  // authenticates with a Bearer token in the Authorization header, so we use
+  // fetch streaming (via api.streamDocEvents) instead of the native
+  // EventSource, which cannot set custom headers. Reconnects automatically on
+  // error with a backoff. SWR's refreshInterval above (same IN_FLIGHT list)
+  // is the polling fallback for lost events — no separate timer needed.
+  const hasPendingDocs = useMemo(() => hasInFlight(docsPage?.items), [docsPage?.items]);
 
   // Bridge the latest docs/mutate/t into the SSE callback without re-
   // subscribing on every status change (which would churn the connection).
@@ -174,15 +174,6 @@ export default function KBDetailPage() {
       controller.abort();
     };
   }, [hasPendingDocs]);
-
-  // Polling fallback: event delivery is best-effort (pub/sub), so a lost
-  // terminal event would leave the list stuck in a processing state.
-  // Re-fetch the list every 15s while anything is still in flight.
-  useEffect(() => {
-    if (!hasPendingDocs) return;
-    const id = setInterval(() => mutate(), 15000);
-    return () => clearInterval(id);
-  }, [hasPendingDocs, mutate]);
 
   async function onUpload(files: FileList | null) {
     if (!files || files.length === 0) return;

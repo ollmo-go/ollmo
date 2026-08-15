@@ -158,7 +158,12 @@ function ExecutionsInner() {
                     </td>
                     <td className="py-2 pr-4 text-muted-foreground whitespace-nowrap">{e.total_ms} ms</td>
                     <td className="py-2 text-right">
-                      <Button size="sm" variant="outline" onClick={() => setSelected(e)}>
+                      <Button size="sm" variant="outline" onClick={() => {
+                        // Open with the list row first (fast), then fetch the
+                        // full record: the list endpoint omits the heavy trace.
+                        setSelected(e);
+                        api.getExecution(e.id).then(setSelected).catch(() => {});
+                      }}>
                         <History className="h-3.5 w-3.5 mr-1" />
                         {t("exec.replay")}
                       </Button>

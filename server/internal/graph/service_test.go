@@ -20,11 +20,11 @@ func newTestSvc(t *testing.T) *Service {
 	return NewService(NewRepo(db), nil)
 }
 
-// TestPersistRelations_CrossChunkEdge verifies the fix for silently dropped
+// TestPersistExtraction_CrossChunkEdge verifies the fix for silently dropped
 // cross-chunk relations: a relation endpoint not extracted from the current
 // chunk resolves to the KB-wide entity created from ANOTHER chunk, so the
 // edge connects to the same entity instead of being discarded.
-func TestPersistRelations_CrossChunkEdge(t *testing.T) {
+func TestPersistExtraction_CrossChunkEdge(t *testing.T) {
 	s := newTestSvc(t)
 	const tenantID, kbID = "t1", "k1"
 
@@ -33,34 +33,26 @@ func TestPersistRelations_CrossChunkEdge(t *testing.T) {
 		ID: uuid.NewString(), TenantID: tenantID, KbID: kbID,
 		Name: "Zhang San", Type: "person", MentionCount: 1, SourceChunkIDs: "chunk-1",
 	}
-	if err := s.repo.UpsertEntity(chunk1Entity); err != nil {
-		t.Fatalf("seed chunk1 entity: %v", err)
+	// Chunk 2 extracted "Ollmo" as its own entity earlier.
+	ollmo := &Entity{
+		ID: uuid.NewString(), TenantID: tenantID, KbID: kbID,
+		Name: "Ollmo", MentionCount: 1, SourceChunkIDs: "chunk-2",
+	}
+	if err := s.repo.CreateEntities([]*Entity{chunk1Entity, ollmo}); err != nil {
+		t.Fatalf("seed entities: %v", err)
 	}
 
-	// Chunk 2 extracted only "Ollmo" locally; its relation references
+	// Chunk 2 mentions only "Ollmo" locally; its relation references
 	// "Zhang San" from chunk 1.
-	local := map[string]string{}
-	for _, name := range []string{"Ollmo"} {
-		e := &Entity{
-			ID: uuid.NewString(), TenantID: tenantID, KbID: kbID,
-			Name: name, MentionCount: 1, SourceChunkIDs: "chunk-2",
-		}
-		if err := s.repo.UpsertEntity(e); err != nil {
-			t.Fatalf("seed chunk2 entity: %v", err)
-		}
-		entities, _ := s.repo.FindByNames(tenantID, kbID, []string{name})
-		if len(entities) == 0 {
-			t.Fatal("seeded entity not found")
-		}
-		local[name] = entities[0].ID
+	res := &ExtractionResult{
+		Entities:  []ExtractedEntity{{Name: "Ollmo"}},
+		Relations: []ExtractedRelation{{Source: "Zhang San", Target: "Ollmo", Type: "founded"}},
+	}
+	if err := s.persistExtraction(tenantID, kbID, "chunk-2", res); err != nil {
+		t.Fatalf("persistExtraction: %v", err)
 	}
 
-	rels := []ExtractedRelation{{Source: "Zhang San", Target: "Ollmo", Type: "founded"}}
-	if err := s.persistRelations(tenantID, kbID, "chunk-2", rels, local); err != nil {
-		t.Fatalf("persistRelations: %v", err)
-	}
-
-	relations, err := s.repo.FindRelations(tenantID, kbID, []string{local["Ollmo"]})
+	relations, err := s.repo.FindRelations(tenantID, kbID, []string{ollmo.ID})
 	if err != nil {
 		t.Fatalf("findRelations: %v", err)
 	}
@@ -73,19 +65,19 @@ func TestPersistRelations_CrossChunkEdge(t *testing.T) {
 	}
 }
 
-// TestPersistRelations_StubEntityForUnknownEndpoint verifies that an endpoint
-// unknown anywhere in the KB gets a stub entity so the edge still persists;
-// a later UpsertEntity for the same name merges into the stub.
-func TestPersistRelations_StubEntityForUnknownEndpoint(t *testing.T) {
+// TestPersistExtraction_StubEntityForUnknownEndpoint verifies that an endpoint
+// unknown anywhere in the KB gets a stub entity so the edge still persists; a
+// later extraction for the same name merges into the stub.
+func TestPersistExtraction_StubEntityForUnknownEndpoint(t *testing.T) {
 	s := newTestSvc(t)
 	const tenantID, kbID = "t1", "k1"
 
-	local := map[string]string{
-		"Ollmo": uuid.NewString(),
+	res := &ExtractionResult{
+		Entities:  []ExtractedEntity{{Name: "Ollmo"}},
+		Relations: []ExtractedRelation{{Source: "Ollmo", Target: "Wang Wu", Type: "uses"}},
 	}
-	rels := []ExtractedRelation{{Source: "Ollmo", Target: "Wang Wu", Type: "uses"}}
-	if err := s.persistRelations(tenantID, kbID, "chunk-1", rels, local); err != nil {
-		t.Fatalf("persistRelations: %v", err)
+	if err := s.persistExtraction(tenantID, kbID, "chunk-1", res); err != nil {
+		t.Fatalf("persistExtraction: %v", err)
 	}
 
 	entities, err := s.repo.FindByNames(tenantID, kbID, []string{"Wang Wu"})
@@ -100,11 +92,10 @@ func TestPersistRelations_StubEntityForUnknownEndpoint(t *testing.T) {
 
 	// A later chunk extracting "Wang Wu" with a description merges into the
 	// stub instead of creating a duplicate row.
-	if err := s.repo.UpsertEntity(&Entity{
-		ID: uuid.NewString(), TenantID: tenantID, KbID: kbID,
-		Name: "Wang Wu", Type: "person", Description: "enriched", MentionCount: 1,
-		SourceChunkIDs: "chunk-9",
-	}); err != nil {
+	enrich := &ExtractionResult{
+		Entities: []ExtractedEntity{{Name: "Wang Wu", Type: "person", Description: "enriched"}},
+	}
+	if err := s.persistExtraction(tenantID, kbID, "chunk-9", enrich); err != nil {
 		t.Fatalf("enrich: %v", err)
 	}
 	entities, _ = s.repo.FindByNames(tenantID, kbID, []string{"Wang Wu"})
@@ -116,18 +107,28 @@ func TestPersistRelations_StubEntityForUnknownEndpoint(t *testing.T) {
 	}
 }
 
-// TestPersistRelations_LocalWins verifies names present in the current
-// chunk's extraction use the local mapping directly without extra queries.
-func TestPersistRelations_LocalWins(t *testing.T) {
+// TestPersistExtraction_SameChunkEdge verifies entities and relations from
+// one chunk connect through the newly minted ids without extra lookups.
+func TestPersistExtraction_SameChunkEdge(t *testing.T) {
 	s := newTestSvc(t)
 	const tenantID, kbID = "t1", "k1"
-	local := map[string]string{"A": "id-a", "B": "id-b"}
-	rels := []ExtractedRelation{{Source: "A", Target: "B", Type: "related"}}
-	if err := s.persistRelations(tenantID, kbID, "chunk-1", rels, local); err != nil {
-		t.Fatalf("persistRelations: %v", err)
+	res := &ExtractionResult{
+		Entities:  []ExtractedEntity{{Name: "A"}, {Name: "B"}},
+		Relations: []ExtractedRelation{{Source: "A", Target: "B", Type: "related"}},
 	}
-	relations, _ := s.repo.FindRelations(tenantID, kbID, []string{"id-a"})
-	if len(relations) != 1 || relations[0].TargetEntityID != "id-b" {
+	if err := s.persistExtraction(tenantID, kbID, "chunk-1", res); err != nil {
+		t.Fatalf("persistExtraction: %v", err)
+	}
+	entities, _ := s.repo.FindByNames(tenantID, kbID, []string{"A", "B"})
+	if len(entities) != 2 {
+		t.Fatalf("got %d entities, want 2", len(entities))
+	}
+	byName := map[string]Entity{}
+	for _, e := range entities {
+		byName[e.Name] = *e
+	}
+	relations, _ := s.repo.FindRelations(tenantID, kbID, []string{byName["A"].ID})
+	if len(relations) != 1 || relations[0].SourceEntityID != byName["A"].ID || relations[0].TargetEntityID != byName["B"].ID {
 		t.Fatalf("got %+v, want single A->B edge", relations)
 	}
 }

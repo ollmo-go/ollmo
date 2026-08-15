@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Brain, Check, Copy, FileText, Pencil, Send, ThumbsDown, ThumbsUp, X } from "lucide-react";
@@ -15,7 +15,11 @@ import { mdComponents } from "@/lib/markdown";
 // by the foreground ChatApp and the agent test drawer so the interaction
 // surface stays identical. onEditSend is optional: when omitted the edit
 // button is hidden (used by the test drawer, which is single-turn).
-export function MessageBubble({
+// Memoized: during streaming, every throttled text update re-renders the
+// parent, and only the streaming bubble should re-render — historical
+// bubbles skip it when their props (stable callbacks, same message refs) are
+// unchanged.
+export const MessageBubble = memo(function MessageBubble({
   message,
   streaming,
   isThinking,
@@ -28,9 +32,9 @@ export function MessageBubble({
   isThinking?: boolean;
   kbId?: string;
   onEditSend?: (text: string) => void;
-  // Vote feedback (persisted messages only). Receiving the current vote
-  // value again clears it.
-  onVote?: (vote: "up" | "down") => void;
+  // Vote feedback (persisted messages only). Receives the full message so
+  // the parent callback can stay referentially stable across renders.
+  onVote?: (message: Message, vote: "up" | "down") => void;
 }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
@@ -48,9 +52,10 @@ export function MessageBubble({
       reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight;
     }
   }, [message.reasoning, streaming, isThinking]);
-  const citations: Citation[] = message.citations
-    ? safeParseCitations(message.citations)
-    : [];
+  const citations: Citation[] = useMemo(
+    () => (message.citations ? safeParseCitations(message.citations) : []),
+    [message.citations]
+  );
   const t = useTranslations();
   const hasStats =
     !!(message.total_ms || message.retrieve_ms || message.generate_ms || message.total_tokens);
@@ -189,7 +194,7 @@ export function MessageBubble({
             {onVote && (
               <>
                 <button
-                  onClick={() => onVote("up")}
+                  onClick={() => onVote(message, "up")}
                   aria-label={t("chat.vote_up")}
                   title={t("chat.vote_up")}
                   className={`hover:text-foreground flex items-center gap-1 ${message.vote === "up" ? "text-green-600 dark:text-green-400" : ""}`}
@@ -197,7 +202,7 @@ export function MessageBubble({
                   <ThumbsUp className="h-3 w-3" />
                 </button>
                 <button
-                  onClick={() => onVote("down")}
+                  onClick={() => onVote(message, "down")}
                   aria-label={t("chat.vote_down")}
                   title={t("chat.vote_down")}
                   className={`hover:text-foreground flex items-center gap-1 ${message.vote === "down" ? "text-red-600 dark:text-red-400" : ""}`}
@@ -254,7 +259,7 @@ export function MessageBubble({
       )}
     </div>
   );
-}
+});
 
 // DocViewerModal loads a cited document's full content and shows the cited
 // passage alongside it. Opened by clicking a citation in MessageBubble.

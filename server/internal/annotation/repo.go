@@ -53,6 +53,17 @@ func (r *Repo) ListEnabled(tenantID, kbID string) ([]*Annotation, error) {
 	return items, err
 }
 
+// HasEnabled reports whether the KB has any enabled annotation. Match calls
+// this before embedding the query so KBs without annotations skip the
+// embedding API call and the doomed Milvus search entirely.
+func (r *Repo) HasEnabled(tenantID, kbID string) (bool, error) {
+	var n int64
+	err := r.db.Model(&Annotation{}).
+		Where("tenant_id = ? AND kb_id = ? AND enabled = ?", tenantID, kbID, true).
+		Limit(1).Count(&n).Error
+	return n > 0, err
+}
+
 func (r *Repo) Update(tenantID, kbID, id string, cols map[string]any) error {
 	res := r.db.Model(&Annotation{}).
 		Where("tenant_id = ? AND kb_id = ? AND id = ?", tenantID, kbID, id).

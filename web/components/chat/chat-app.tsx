@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { Brain, ChevronLeft, Download, LogOut, MessageSquare, PanelLeft, Pin, Plus, Send, Settings, Square, Trash2, Pencil, User, LogIn } from "lucide-react";
@@ -45,6 +45,49 @@ function parseFollowUps(raw?: string): string[] {
   }
 }
 
+// useThrottledText buffers streaming token updates: tokens arrive faster
+// than the screen can paint, so schedule() holds the latest value and flushes
+// at most every `delay` ms; finish() cancels the timer and applies a final
+// value immediately (pass "" to reset).
+function useThrottledText(delay = 50) {
+  const [text, setText] = useState("");
+  const ref = useRef({ pending: "", timer: null as number | null });
+  const schedule = useCallback(
+    (v: string) => {
+      const f = ref.current;
+      f.pending = v;
+      if (f.timer !== null) return;
+      f.timer = window.setTimeout(() => {
+        f.timer = null;
+        setText(f.pending);
+      }, delay);
+    },
+    [delay]
+  );
+  const finish = useCallback((v: string) => {
+    const f = ref.current;
+    if (f.timer !== null) {
+      clearTimeout(f.timer);
+      f.timer = null;
+    }
+    f.pending = v;
+    setText(v);
+  }, []);
+  return [text, schedule, finish] as const;
+}
+
+// useDebouncedValue delays propagating fast-changing state (search input):
+// the conversation list keys SWR per query, so without a debounce every
+// keystroke fires a request.
+function useDebouncedValue<T>(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
 export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile?: UserProfile | null; isAdmin?: boolean }) {
   const [selectedKb, setSelectedKb] = useState<string>("");
   const [selectedConv, setSelectedConv] = useState<string>("");
@@ -60,8 +103,8 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [pendingCitations, setPendingCitations] = useState<Citation[]>([]);
-  const [streamedText, setStreamedText] = useState("");
-  const [streamedThinking, setStreamedThinking] = useState("");
+  const [streamedText, scheduleStreamText, finishStreamText] = useThrottledText();
+  const [streamedThinking, scheduleStreamThink, finishStreamThink] = useThrottledText();
   const [summarizing, setSummarizing] = useState(false);
   const [showList, setShowList] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -75,9 +118,10 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
 
   const { data: kbs } = useSWR(authed ? "kb-list" : null, () => api.listKBs(1, 50));
   const [convQuery, setConvQuery] = useState("");
+  const debouncedConvQuery = useDebouncedValue(convQuery);
   const { data: convs, mutate: mutateConvs } = useSWR<Paginated<Conversation>>(
-    authed ? (convQuery ? ["conv-search", convQuery] : "conv-list") : null,
-    () => api.listConversations(1, 50, convQuery || undefined)
+    authed ? (debouncedConvQuery ? ["conv-search", debouncedConvQuery] : "conv-list") : null,
+    () => api.listConversations(1, 50, debouncedConvQuery || undefined)
   );
   const filteredConvs = convs?.items?.filter((c) => c.kb_id === selectedKb);
 
@@ -180,8 +224,8 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
               created_at: new Date().toISOString(),
             },
           ]);
-          setStreamedText("");
-          setStreamedThinking("");
+          finishStreamText("");
+          finishStreamThink("");
           setPendingCitations([]);
           setStreaming(true);
         },
@@ -192,18 +236,18 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         onToken: (tk) => {
           if (skip()) return;
           acc += tk;
-          setStreamedText(acc);
+          scheduleStreamText(acc);
         },
         onThinking: (tk) => {
           if (skip()) return;
           thinkAcc += tk;
-          setStreamedThinking(thinkAcc);
+          scheduleStreamThink(thinkAcc);
         },
         onDone: () => {
           if (skip()) return;
           setStreaming(false);
-          setStreamedText("");
-          setStreamedThinking("");
+          finishStreamText("");
+          finishStreamThink("");
           setPendingCitations([]);
           api.listMessages(selectedConv).then((r) => setMessages(r.items)).catch(() => {});
           mutateConvs();
@@ -218,8 +262,8 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         // refetch shows what was produced.
         if (res.error && !skip()) {
           setStreaming(false);
-          setStreamedText("");
-          setStreamedThinking("");
+          finishStreamText("");
+          finishStreamThink("");
           setPendingCitations([]);
           api.listMessages(selectedConv).then((r) => setMessages(r.items)).catch(() => {});
         }
@@ -378,8 +422,8 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         const title = text.length > 30 ? text.slice(0, 30) + "…" : text;
         const conv = await api.createConversation(selectedKb, { title });
         convId = conv.id;
-        const r = await api.listMessages(convId);
-        setMessages(r.items);
+        // A just-created conversation has no messages — skip the fetch.
+        setMessages([]);
         skipFetchRef.current = true;
         selectConv(convId);
         mutateConvs();
@@ -398,8 +442,8 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
       created_at: new Date().toISOString(),
     };
     setMessages((m) => [...m, userMsg]);
-    setStreamedText("");
-    setStreamedThinking("");
+    finishStreamText("");
+    finishStreamThink("");
     setPendingCitations([]);
     setStreaming(true);
     selfStreamingRef.current = true;
@@ -414,26 +458,18 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     let streamError = "";
     let doneStats: ReplyStats | undefined;
     let annReply = false;
-    let followUps: string[] = [];
+    let finalized = false;
 
-    try {
-      const stream = api.streamChat(convId, { message: text }, controller.signal);
-      const { error } = await consumeChatStream(stream, {
-        onCitations: (c) => { cits = c; setPendingCitations(c); },
-        onToken: (tk, annotation) => {
-          acc += tk;
-          setStreamedText(acc);
-          if (annotation) annReply = true;
-        },
-        onThinking: (tk) => { thinkAcc += tk; setStreamedThinking(thinkAcc); },
-        onDone: (id, stats) => { doneMsgId = id; doneStats = stats; },
-        onWarning: (w) => { acc += `⚠️ ${w}\n\n`; setStreamedText(acc); },
-        onFollowUps: (qs) => { followUps = qs; },
-      });
-      streamError = error ?? "";
-    } finally {
-      const content = streamError
-        ? (acc ? `${acc}\n\n⚠️ ${streamError}` : `⚠️ ${streamError}`)
+    // finalize ends the streaming UI (final message in, cursor out) at the
+    // done EVENT, not at stream close: the server keeps the stream open
+    // after done to generate follow-up chips (an extra LLM call, up to
+    // 15s), which must not keep the blinking cursor alive. The error/abort
+    // path in the finally block reuses it.
+    const finalize = (errMsg?: string) => {
+      if (finalized) return;
+      finalized = true;
+      const content = errMsg
+        ? (acc ? `${acc}\n\n⚠️ ${errMsg}` : `⚠️ ${errMsg}`)
         : acc;
       if (content) {
         setMessages((m) => [
@@ -453,16 +489,39 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
             completion_tokens: doneStats?.completion_tokens,
             total_tokens: doneStats?.total_tokens,
             annotation: annReply || undefined,
-            follow_ups: followUps.length ? JSON.stringify(followUps) : undefined,
             created_at: new Date().toISOString(),
           },
         ]);
       }
-      if (streamError) toast.error(streamError);
-      setStreamedText("");
-      setStreamedThinking("");
+      if (errMsg) toast.error(errMsg);
+      finishStreamText("");
+      finishStreamThink("");
       setPendingCitations([]);
       setStreaming(false);
+    };
+
+    try {
+      const stream = api.streamChat(convId, { message: text }, controller.signal);
+      const { error } = await consumeChatStream(stream, {
+        onCitations: (c) => { cits = c; setPendingCitations(c); },
+        onToken: (tk, annotation) => {
+          acc += tk;
+          scheduleStreamText(acc);
+          if (annotation) annReply = true;
+        },
+        onThinking: (tk) => { thinkAcc += tk; scheduleStreamThink(thinkAcc); },
+        onDone: (id, stats) => { doneMsgId = id; doneStats = stats; finalize(); },
+        onWarning: (w) => { acc += `⚠️ ${w}\n\n`; scheduleStreamText(acc); },
+        // Chips arrive after done (while the stream is still open); patch
+        // them onto the already-finalized message row.
+        onFollowUps: (qs) => {
+          const b = JSON.stringify(qs);
+          setMessages((m) => m.map((x) => (x.id === doneMsgId ? { ...x, follow_ups: b } : x)));
+        },
+      });
+      streamError = error ?? "";
+    } finally {
+      finalize(streamError);
       selfStreamingRef.current = false;
       abortRef.current = null;
       mutateQuota();
@@ -483,7 +542,9 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
 
   // Vote feedback on an assistant message. Clicking the active icon clears
   // the vote; optimistic update with rollback on failure.
-  async function vote(m: Message, v: "up" | "down") {
+  // Stable across renders so memoized MessageBubbles skip re-render while a
+  // stream updates other state.
+  const vote = useCallback(async (m: Message, v: "up" | "down") => {
     const next = m.vote === v ? "" : v;
     setMessages((ms) => ms.map((x) => (x.id === m.id ? { ...x, vote: next || undefined } : x)));
     try {
@@ -492,7 +553,14 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
       setMessages((ms) => ms.map((x) => (x.id === m.id ? { ...x, vote: m.vote } : x)));
       toast.error(e?.message || "Vote failed");
     }
-  }
+  }, []);
+
+  // Stable wrapper around send (which is recreated every render): memoized
+  // user bubbles compare props by reference and would otherwise re-render on
+  // every parent state change.
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const editSend = useCallback((text: string) => sendRef.current(text), []);
 
   const chatInput = (
     <div className="rounded-2xl border bg-background shadow-sm">
@@ -765,8 +833,8 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                       <MessageBubble
                         message={m}
                         kbId={selectedKb}
-                        onEditSend={m.role === "user" ? (text) => send(text) : undefined}
-                        onVote={m.role === "assistant" && m.id !== "greeting" ? (v) => vote(m, v) : undefined}
+                        onEditSend={m.role === "user" ? editSend : undefined}
+                        onVote={m.role === "assistant" && m.id !== "greeting" ? vote : undefined}
                       />
                       {chips.length > 0 && (
                         <div className="flex flex-wrap gap-2 mt-1">

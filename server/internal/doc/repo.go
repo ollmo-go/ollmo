@@ -181,16 +181,16 @@ func (r *Repo) DecDocChunkCount(tenantID, docID string) error {
 		UpdateColumn("chunk_count", gorm.Expr("chunk_count - 1")).Error
 }
 
-func (r *Repo) SetDocVectorIDs(tenantID, docID string, vectorIDs map[string]string) error {
-	// vectorIDs maps chunk_id -> milvus_vector_id
-	for chunkID, vectorID := range vectorIDs {
-		if err := r.db.Model(&Chunk{}).
-			Where("tenant_id = ? AND id = ?", tenantID, chunkID).
-			Update("vector_id", vectorID).Error; err != nil {
-			return err
-		}
+// MarkChunksEmbedded sets vector_id = id for the given chunks. The Milvus
+// primary key equals the chunk id, so embedding success is the only fact to
+// record — one statement instead of one UPDATE per chunk.
+func (r *Repo) MarkChunksEmbedded(tenantID, docID string, chunkIDs []string) error {
+	if len(chunkIDs) == 0 {
+		return nil
 	}
-	return nil
+	return r.db.Model(&Chunk{}).
+		Where("tenant_id = ? AND doc_id = ? AND id IN ?", tenantID, docID, chunkIDs).
+		UpdateColumn("vector_id", gorm.Expr("id")).Error
 }
 
 func (r *Repo) DeleteDoc(tenantID, id string) error {

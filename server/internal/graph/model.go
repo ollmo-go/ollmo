@@ -7,12 +7,14 @@ import "time"
 // The same entity name across chunks is deduplicated into one row per KB so
 // the graph connects documents through shared entities.
 type Entity struct {
-	ID          string `gorm:"primaryKey;size:36" json:"id"`
-	TenantID    string `gorm:"size:36;index:idx_ent_tenant_kb,priority:1;not null" json:"tenant_id"`
-	KbID        string `gorm:"size:36;index:idx_ent_tenant_kb,priority:2;not null" json:"kb_id"`
-	Name        string `gorm:"size:256;not null" json:"name"`
-	Type        string `gorm:"size:64" json:"type"`
-	Description string `gorm:"type:text" json:"description"`
+	ID       string `gorm:"primaryKey;size:36" json:"id"`
+	TenantID string `gorm:"size:36;index:idx_ent_tenant_kb,priority:1;not null" json:"tenant_id"`
+	KbID     string `gorm:"size:36;index:idx_ent_tenant_kb,priority:2;not null" json:"kb_id"`
+	// Name is part of idx_ent_tenant_kb_name because every extraction and
+	// retrieval resolves entities by (tenant, kb, name [IN ...]) lookups.
+	Name           string `gorm:"size:256;index:idx_ent_tenant_kb_name,priority:3;not null" json:"name"`
+	Type           string `gorm:"size:64" json:"type"`
+	Description    string `gorm:"type:text" json:"description"`
 	// SourceChunkIDs is the list of chunk IDs where this entity was mentioned.
 	// Stored as JSON so we can trace back to the original text without a join
 	// table.

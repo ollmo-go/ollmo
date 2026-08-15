@@ -1,8 +1,6 @@
 package graph
 
 import (
-	"errors"
-
 	"gorm.io/gorm"
 )
 
@@ -12,31 +10,25 @@ type Repo struct {
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
-// UpsertEntity inserts a new entity or merges into an existing one with the
-// same (kb_id, name). When merging, the mention count is bumped and the new
-// chunk ID is appended to source_chunk_ids (deduplicated).
-func (r *Repo) UpsertEntity(e *Entity) error {
-	var existing Entity
-	err := r.db.Where("tenant_id = ? AND kb_id = ? AND name = ?", e.TenantID, e.KbID, e.Name).First(&existing).Error
-	if err == nil {
-		existing.MentionCount += e.MentionCount
-		if e.Description != "" && existing.Description == "" {
-			existing.Description = e.Description
-		}
-		if e.Type != "" && existing.Type == "" {
-			existing.Type = e.Type
-		}
-		existing.SourceChunkIDs = mergeChunkIDs(existing.SourceChunkIDs, e.SourceChunkIDs)
-		return r.db.Save(&existing).Error
+// CreateEntities inserts a batch of new entities in one statement round.
+func (r *Repo) CreateEntities(items []*Entity) error {
+	if len(items) == 0 {
+		return nil
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-	return r.db.Create(e).Error
+	return r.db.CreateInBatches(items, 100).Error
 }
 
-func (r *Repo) CreateRelation(rel *Relation) error {
-	return r.db.Create(rel).Error
+// SaveEntity persists an in-memory merged entity row.
+func (r *Repo) SaveEntity(e *Entity) error {
+	return r.db.Save(e).Error
+}
+
+// CreateRelations inserts a batch of relation rows.
+func (r *Repo) CreateRelations(items []*Relation) error {
+	if len(items) == 0 {
+		return nil
+	}
+	return r.db.CreateInBatches(items, 100).Error
 }
 
 // FindByNames returns entities matching any of the given names (case-insensitive)

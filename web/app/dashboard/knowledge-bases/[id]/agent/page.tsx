@@ -125,30 +125,30 @@ function AgentChatDrawer({ kbId, onClose, onTrace, onTraceStep, onSendStart }: {
     if (!streaming) inputRef.current?.focus();
   }, [streaming]);
 
-  // Fetch the agent's opening message on mount without creating a conversation.
-  // The conversation is created lazily on first send() to avoid creating +
+  // Fetch the agent's opening message on mount without creating a
+  // conversation. Uses the same SWR key as the canvas ("agent-${kbId}") so
+  // the drawer reuses the cached agent instead of re-fetching it. The
+  // conversation is created lazily on first send() to avoid creating +
   // deleting a conversation every time the drawer is opened (and twice in
   // React Strict Mode).
+  const { data: agentData } = useSWR(`agent-${kbId}`, () => api.getAgent(kbId));
   useEffect(() => {
-    let cancelled = false;
-    api.getAgent(kbId).then((agent) => {
-      if (cancelled) return;
-      const msg = agent.definition?.opening_message;
-      if (typeof msg === "string" && msg) {
-        setMessages([{
-          id: "greeting",
-          tenant_id: "",
-          conversation_id: "",
-          role: "assistant",
-          content: msg,
-          created_at: new Date().toISOString(),
-        }]);
-      }
-      const qs = agent.definition?.suggested_questions;
-      setSuggestedQuestions(Array.isArray(qs) ? qs : []);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [kbId]);
+    const agent = agentData;
+    if (!agent) return;
+    const msg = agent.definition?.opening_message;
+    if (typeof msg === "string" && msg) {
+      setMessages([{
+        id: "greeting",
+        tenant_id: "",
+        conversation_id: "",
+        role: "assistant",
+        content: msg,
+        created_at: new Date().toISOString(),
+      }]);
+    }
+    const qs = agent.definition?.suggested_questions;
+    setSuggestedQuestions(Array.isArray(qs) ? qs : []);
+  }, [agentData]);
 
   // Abort any in-flight stream on unmount.
   useEffect(() => {
@@ -187,23 +187,19 @@ function AgentChatDrawer({ kbId, onClose, onTrace, onTraceStep, onSendStart }: {
     let cits: Citation[] = [];
     let doneStats: ReplyStats | undefined;
     let streamError = "";
+    let finalized = false;
 
-    try {
-      const stream = api.testChat(kbId, { message: text }, controller.signal);
-      const { error } = await consumeChatStream(stream, {
-        onCitations: (c) => { cits = c; setPendingCitations(c); },
-        onToken: (t) => { acc += t; setStreamedText(acc); },
-        onThinking: (t) => { thinkAcc += t; setStreamedThinking(thinkAcc); },
-        onDone: (_id, stats, trace) => { doneStats = stats; if (trace) onTrace?.(trace); },
-        onWarning: (w) => { acc += `> ${w}\n\n`; setStreamedText(acc); },
-        onTraceStep: (step) => { onTraceStep?.(step); },
-      });
-      streamError = error ?? "";
-    } finally {
+    // finalize ends the streaming UI at the done EVENT, not at stream
+    // close: the server keeps the test stream open after done to generate
+    // follow-up chips (an extra LLM call), which must not keep the
+    // blinking cursor alive. The error/abort path reuses it.
+    const finalize = (errMsg?: string) => {
+      if (finalized) return;
+      finalized = true;
       // Quota errors are shown as a toast only, not appended to the bubble.
-      const isQuotaErr = streamError.includes("quota exceeded");
-      const content = streamError && !isQuotaErr
-        ? (acc ? `${acc}\n\n> ${streamError}` : `> ${streamError}`)
+      const isQuotaErr = !!errMsg && errMsg.includes("quota exceeded");
+      const content = errMsg && !isQuotaErr
+        ? (acc ? `${acc}\n\n> ${errMsg}` : `> ${errMsg}`)
         : acc;
       if (content) {
         setMessages((m) => [
@@ -226,19 +222,34 @@ function AgentChatDrawer({ kbId, onClose, onTrace, onTraceStep, onSendStart }: {
           },
         ]);
       }
-      if (streamError) {
+      if (errMsg) {
         // Map raw quota errors to a friendly localized message.
-        if (streamError.includes("quota exceeded")) {
+        if (isQuotaErr) {
           toast.error(t("chat.quota_exceeded"));
         } else {
-          toast.error(streamError);
+          toast.error(errMsg);
         }
       }
-      mutateQuota();
       setStreamedText("");
       setStreamedThinking("");
       setPendingCitations([]);
       setStreaming(false);
+    };
+
+    try {
+      const stream = api.testChat(kbId, { message: text }, controller.signal);
+      const { error } = await consumeChatStream(stream, {
+        onCitations: (c) => { cits = c; setPendingCitations(c); },
+        onToken: (t) => { acc += t; setStreamedText(acc); },
+        onThinking: (t) => { thinkAcc += t; setStreamedThinking(thinkAcc); },
+        onDone: (_id, stats, trace) => { doneStats = stats; if (trace) onTrace?.(trace); finalize(); },
+        onWarning: (w) => { acc += `> ${w}\n\n`; setStreamedText(acc); },
+        onTraceStep: (step) => { onTraceStep?.(step); },
+      });
+      streamError = error ?? "";
+    } finally {
+      finalize(streamError);
+      mutateQuota();
       abortRef.current = null;
     }
   }
