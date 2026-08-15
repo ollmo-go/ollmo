@@ -31,7 +31,7 @@ func NewService(repo *Repo, chatStore, embedStore, rerankStore KindStore) *Servi
 
 func (s *Service) storeForKind(kind string) (KindStore, error) {
 	switch kind {
-	case modelcatalog.KindChat:
+	case modelcatalog.KindChat, "llm":
 		return s.chatStore, nil
 	case modelcatalog.KindEmbedding:
 		return s.embedStore, nil
