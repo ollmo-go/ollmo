@@ -13,6 +13,7 @@ import (
 	"ollmo/ollmo/internal/config"
 	"ollmo/ollmo/internal/doc"
 	"ollmo/ollmo/internal/embedding"
+	"ollmo/ollmo/internal/execution"
 	"ollmo/ollmo/internal/graph"
 	"ollmo/ollmo/internal/invitation"
 	"ollmo/ollmo/internal/kb"
@@ -51,6 +52,7 @@ func RunMigrate(cfg *config.Config) error {
 		&graph.Entity{},
 		&graph.Relation{},
 		&agent.Agent{},
+		&execution.Execution{},
 		&memory.Memory{},
 		&doc.CleanupTask{},
 		&apikey.APIKey{},

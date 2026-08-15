@@ -9,6 +9,10 @@ export interface StreamCallbacks {
   onDone?: (messageId: string, stats?: ReplyStats, trace?: TraceStep[]) => void;
   onWarning?: (warning: string) => void;
   onTraceStep?: (step: TraceStep) => void;
+  onFollowUps?: (questions: string[]) => void;
+  /** Subscription streams only: a user message sent from another client
+   *  opened a new turn (messageId + text). */
+  onUser?: (messageId: string, text: string) => void;
 }
 
 /** Result of consuming a chat stream. `error` is non-null when the stream
@@ -35,12 +39,16 @@ export async function consumeChatStream(
       if (done) break;
       if (reply.phase === "retrieve" && reply.citations) {
         cb.onCitations?.(reply.citations);
+      } else if (reply.phase === "user" && reply.token) {
+        cb.onUser?.(reply.message_id || "", reply.token);
       } else if (reply.phase === "generate" && reply.token) {
         cb.onToken?.(reply.token, reply.annotation);
       } else if (reply.phase === "thinking" && reply.token) {
         cb.onThinking?.(reply.token);
       } else if (reply.phase === "done") {
         cb.onDone?.(reply.message_id || "", reply.stats, reply.trace);
+      } else if (reply.phase === "follow_ups" && reply.questions?.length) {
+        cb.onFollowUps?.(reply.questions);
       } else if (reply.phase === "trace" && reply.trace?.[0]) {
         cb.onTraceStep?.(reply.trace[0]);
       } else if (reply.phase === "error") {

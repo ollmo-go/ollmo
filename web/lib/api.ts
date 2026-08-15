@@ -252,6 +252,9 @@ export interface Message {
   // Client-only flag: this assistant message came from a matched annotation
   // reply, not the LLM (not persisted server-side).
   annotation?: boolean;
+  // LLM-generated follow-up suggestions for this assistant message, stored
+  // as a JSON string array; rendered as clickable chips under the reply.
+  follow_ups?: string;
   // User feedback on an assistant message: "up", "down", or unset.
   vote?: string;
   created_at: string;
@@ -656,6 +659,20 @@ export const api = {
     });
   },
 
+  // Agent execution history (replayable graph runs)
+  async listExecutions(kbId: string, page = 1, size = 20, source?: string): Promise<Paginated<Execution>> {
+    const q = source ? `&source=${source}` : "";
+    return request(`/knowledge-bases/${kbId}/executions?page=${page}&size=${size}${q}`);
+  },
+  async getExecution(id: string): Promise<Execution> {
+    return request(`/executions/${id}`);
+  },
+  // Find the execution that produced one assistant message; used by the
+  // analytics feedback list to deep-link a bad case into replay.
+  async getExecutionByMessage(kbId: string, messageId: string): Promise<Execution> {
+    return request(`/knowledge-bases/${kbId}/executions/by-message/${messageId}`);
+  },
+
   // Memory
   async summarizeConversation(convId: string): Promise<Memory> {
     return request(`/conversations/${convId}/summarize`, { method: "POST" });
@@ -966,6 +983,14 @@ export const api = {
     ) as AsyncGenerator<StreamReply>;
   },
 
+  // subscribeConversation opens a live SSE connection to follow a
+  // conversation from another tab/device (observer stream). Yields the same
+  // StreamReply events the sending client sees, plus "user" events carrying
+  // questions asked elsewhere. Stays open until aborted.
+  subscribeConversation(convId: string, signal?: AbortSignal): AsyncGenerator<StreamReply> {
+    return streamGETSSE(`/conversations/${convId}/stream`, signal) as AsyncGenerator<StreamReply>;
+  },
+
   // testChat streams an agent reply without persisting anything. Used by the
   // agent config test drawer. Same SSE format as streamChat, but no
   // conversation is created and no messages are saved.
@@ -1203,6 +1228,23 @@ export interface TraceStep {
   detail?: string;
 }
 
+// One persisted agent-graph run with its full node trace for replay.
+export interface Execution {
+  id: string;
+  kb_id: string;
+  conversation_id?: string;
+  message_id?: string;
+  user_id?: string;
+  source: "chat" | "test";
+  status: "success" | "error" | "cancelled";
+  query: string;
+  answer?: string;
+  terminal_type?: string;
+  trace: string;
+  total_ms: number;
+  created_at: string;
+}
+
 // Result of the single-node debug API (agent canvas "test this node").
 export interface NodeDebugResult {
   type: string;
@@ -1216,7 +1258,9 @@ export interface NodeDebugResult {
 }
 
 export interface StreamReply {
-  phase: "retrieve" | "thinking" | "generate" | "done" | "error" | "warning" | "trace";
+  // "user" appears on subscription streams only (a question asked on
+  // another client); the sending client never receives it.
+  phase: "retrieve" | "thinking" | "generate" | "done" | "follow_ups" | "error" | "warning" | "trace" | "user";
   token?: string;
   citations?: Citation[];
   message_id?: string;
@@ -1225,6 +1269,7 @@ export interface StreamReply {
   stats?: ReplyStats;
   trace?: TraceStep[];
   annotation?: boolean;
+  questions?: string[];
 }
 
 // streamSSE opens a POST request and parses the Server-Sent Events response.
@@ -1272,15 +1317,13 @@ async function* streamSSE(path: string, body: unknown, signal?: AbortSignal): As
   }
 }
 
-// streamDocEvents opens a GET Server-Sent Events connection to receive
-// real-time document status updates from /documents/events. Uses fetch
-// streaming (rather than the native EventSource) because the JWT must be
-// sent via the Authorization header, which EventSource cannot set. The
-// ReadableStream is parsed incrementally using the same SSE framing as
-// streamSSE. Used by the document list page to update statuses live.
-async function* streamDocEvents(signal?: AbortSignal): AsyncGenerator<DocEvent> {
+// streamGETSSE opens a GET Server-Sent Events connection and parses it
+// incrementally. Uses fetch streaming (rather than the native EventSource)
+// because the JWT must be sent via the Authorization header, which
+// EventSource cannot set. Same SSE framing as streamSSE.
+async function* streamGETSSE(path: string, signal?: AbortSignal): AsyncGenerator<unknown> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}/api/v1/documents/events`, {
+  const res = await fetch(`${API_BASE}/api/v1${path}`, {
     method: "GET",
     credentials: "include",
     headers: {
@@ -1310,10 +1353,16 @@ async function* streamDocEvents(signal?: AbortSignal): AsyncGenerator<DocEvent> 
       const payload = line.slice(5).trim();
       if (!payload) continue;
       try {
-        yield JSON.parse(payload) as DocEvent;
+        yield JSON.parse(payload);
       } catch {
         // Skip malformed events; the server keeps the stream open.
       }
     }
   }
+}
+
+// streamDocEvents receives real-time document status updates from
+// /documents/events. Used by the document list page to update statuses live.
+async function* streamDocEvents(signal?: AbortSignal): AsyncGenerator<DocEvent> {
+  yield* streamGETSSE("/documents/events", signal) as AsyncGenerator<DocEvent>;
 }

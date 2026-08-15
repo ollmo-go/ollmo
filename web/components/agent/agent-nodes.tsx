@@ -227,6 +227,17 @@ export const agentNodeTypes = {
   note: NoteNode,
 };
 
+// Node type -> i18n label key. Shared by the canvas palette and the
+// execution replay timeline so names stay in one place.
+export const NODE_TYPE_LABEL_KEY: Record<string, string> = {
+  retrieval: "agent.node_retrieval",
+  llm: "agent.node_llm",
+  message: "agent.node_message",
+  condition: "agent.node_condition",
+  classifier: "agent.node_classifier",
+  note: "agent.node_note",
+};
+
 // LabeledEdge renders the branch label as an HTML badge via EdgeLabelRenderer
 // so theme CSS variables resolve correctly (SVG label bg falls back to black).
 // Hovering the edge reveals a "+" under the midpoint that inserts a new node

@@ -9,15 +9,18 @@ import {
   HardDrive,
   Layers,
   Activity,
+  History,
   ThumbsDown,
   ThumbsUp,
   type LucideIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { api, AnalyticsOverview, AnalyticsDocStats, KBUsage, ActivityItem, FeedbackItem } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { formatSize, formatTime } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 
 // Color tokens for icon badges. Tailwind requires static class names, so we
 // enumerate the variants used across the dashboard.
@@ -73,6 +76,7 @@ function StatusPill({ status }: { status: string }) {
 
 export default function AnalyticsPage() {
   const t = useTranslations();
+  const router = useRouter();
   const { data: overview } = useSWR<AnalyticsOverview>("analytics-overview", () => api.analyticsOverview());
   const { data: docStats } = useSWR<AnalyticsDocStats>("analytics-docs", () => api.analyticsDocStats());
   const { data: usage } = useSWR<{ items: KBUsage[] }>("analytics-usage", () => api.analyticsUsage());
@@ -237,7 +241,8 @@ export default function AnalyticsPage() {
                     <th className="pb-2 px-4 font-medium">{t("analytics.feedback_answer")}</th>
                     <th className="pb-2 px-4 font-medium">{t("analytics.kb_name")}</th>
                     <th className="pb-2 px-4 font-medium">{t("analytics.feedback_user")}</th>
-                    <th className="pb-2 pl-4 font-medium text-right">{t("analytics.feedback_time")}</th>
+                    <th className="pb-2 px-4 font-medium text-right">{t("analytics.feedback_time")}</th>
+                    <th className="pb-2 pl-4 font-medium" />
                   </tr>
                 </thead>
                 <tbody>
@@ -255,6 +260,18 @@ export default function AnalyticsPage() {
                       <td className="py-2 px-4 truncate max-w-[140px]">{f.kb_name}</td>
                       <td className="py-2 px-4 truncate max-w-[120px]">{f.user_name}</td>
                       <td className="py-2 pl-4 text-right text-xs text-muted-foreground whitespace-nowrap">{formatTime(f.created_at)}</td>
+                      <td className="py-2 pl-4 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            router.push(`/dashboard/knowledge-bases/${f.kb_id}/executions?msg=${f.id}`)
+                          }
+                        >
+                          <History className="h-3.5 w-3.5 mr-1" />
+                          {t("analytics.view_execution")}
+                        </Button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

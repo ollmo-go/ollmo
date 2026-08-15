@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import Link from "next/link";
-import { ArrowLeft, Brain, Check, ChevronDown, Download, FileText, Globe, MessageSquareQuote, MoreVertical, Pencil, RefreshCw, Search, Settings2, Tags, Trash2, Upload, BookMarked, X } from "lucide-react";
+import { ArrowLeft, Brain, Check, ChevronDown, Download, FileText, Globe, History, MessageSquareQuote, MoreVertical, Pencil, RefreshCw, Search, Settings2, Tags, Trash2, Upload, BookMarked, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -635,6 +635,12 @@ export default function KBDetailPage() {
             <Button variant="outline">
               <Brain className="h-4 w-4 mr-1" />
               {t("kb.agent")}
+            </Button>
+          </Link>
+          <Link href={`/dashboard/knowledge-bases/${kbId}/executions`}>
+            <Button variant="outline">
+              <History className="h-4 w-4 mr-1" />
+              {t("exec.title")}
             </Button>
           </Link>
           <Link href={`/dashboard/knowledge-bases/${kbId}/memories`}>

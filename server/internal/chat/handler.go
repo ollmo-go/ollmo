@@ -205,6 +205,21 @@ func (h *Handler) TestChat(c *fiber.Ctx) error {
 	return nil
 }
 
+// Subscribe streams live conversation events to a client viewing the
+// conversation: user questions and assistant tokens published by another
+// client's Stream call are fanned out here (observer pattern), so multiple
+// tabs/devices stay in sync. The connection stays open (heartbeat kept)
+// until the client disconnects.
+func (h *Handler) Subscribe(c *fiber.Ctx) error {
+	convID := c.Params("id")
+	ch, err := h.svc.Subscribe(middleware.TenantID(c), middleware.UserID(c), convID)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	writeSSEOnEnd(c, ch, func() { h.svc.hub.Unsubscribe(convID, ch) })
+	return nil
+}
+
 // DebugNode runs a single agent node in isolation (canvas "test this node").
 // Returns the node's output without walking the graph or persisting anything.
 func (h *Handler) DebugNode(c *fiber.Ctx) error {
@@ -236,18 +251,24 @@ func (h *Handler) DebugNode(c *fiber.Ctx) error {
 // variable so tests can shorten it.
 var sseHeartbeat = 30 * time.Second
 
-// writeSSE sets SSE headers and writes the channel as a stream of `data:`
-// lines. Shared by Stream and TestChat. A periodic comment heartbeat keeps
-// intermediaries (nginx, cloud LBs) from closing the connection during long
-// silent gaps (e.g. waiting for the first LLM token); clients ignore
-// non-data lines per the SSE spec.
 func writeSSE(c *fiber.Ctx, ch <-chan StreamReply) {
+	writeSSEOnEnd(c, ch, nil)
+}
+
+// writeSSEOnEnd is writeSSE with an onEnd callback invoked once the stream
+// writer stops (client disconnect or channel close). Used by Subscribe to
+// release its hub registration; the callback runs inside the body writer
+// goroutine, i.e. after the handler has already returned.
+func writeSSEOnEnd(c *fiber.Ctx, ch <-chan StreamReply, onEnd func()) {
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("Connection", "keep-alive")
 	c.Set("X-Accel-Buffering", "no")
 	c.Context().SetContentType("text/event-stream; charset=utf-8")
 	c.Context().Response.SetBodyStreamWriter(func(w *bufio.Writer) {
+		if onEnd != nil {
+			defer onEnd()
+		}
 		ticker := time.NewTicker(sseHeartbeat)
 		defer ticker.Stop()
 		for {

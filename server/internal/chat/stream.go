@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"ollmo/ollmo/internal/agent"
 	"ollmo/ollmo/internal/annotation"
+	"ollmo/ollmo/internal/execution"
 	"ollmo/ollmo/internal/llm"
 	"ollmo/ollmo/internal/search"
 	"ollmo/ollmo/pkg/clients"
@@ -198,7 +200,7 @@ func (s *Service) runStream(
 	// answer verbatim.
 	if s.annMatch != nil {
 		if m := s.annMatch.Match(ctx, tenantID, conv.KbID, query); m != nil {
-			s.replyAnnotation(ctx, tenantID, conv, m, out, totalStart)
+			s.replyAnnotation(ctx, tenantID, conv, m, out, totalStart, provider, query)
 			return
 		}
 	}
@@ -287,6 +289,7 @@ func (s *Service) runStream(
 	assistantID := s.saveAssistant(tenantID, conv.ID, content, cits, stats, reasoning)
 	s.triggerAutoMemory(tenantID, conv.ID)
 	send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: stats})
+	s.emitFollowUps(ctx, provider, tenantID, conv.ID, assistantID, query, content, out)
 	if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
 		log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
 	}
@@ -295,7 +298,7 @@ func (s *Service) runStream(
 // replyAnnotation streams a matched annotation answer: one generate event
 // with the full text, then done. The reply is persisted like any assistant
 // message so history and the left list stay consistent.
-func (s *Service) replyAnnotation(ctx context.Context, tenantID string, conv *Conversation, m *annotation.MatchResult, out chan<- StreamReply, start time.Time) {
+func (s *Service) replyAnnotation(ctx context.Context, tenantID string, conv *Conversation, m *annotation.MatchResult, out chan<- StreamReply, start time.Time, provider *llm.LLMModel, query string) {
 	answer := m.Annotation.Answer
 	stats := &ReplyStats{TotalMs: int(time.Since(start).Milliseconds())}
 	if !send(ctx, out, StreamReply{Phase: PhaseGenerate, Token: answer, Annotation: true}) {
@@ -304,8 +307,140 @@ func (s *Service) replyAnnotation(ctx context.Context, tenantID string, conv *Co
 	}
 	assistantID := s.saveAssistant(tenantID, conv.ID, answer, nil, stats, "")
 	send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: stats, Annotation: true})
+	s.emitFollowUps(ctx, provider, tenantID, conv.ID, assistantID, query, answer, out)
 	if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
 		log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
+	}
+}
+
+// Follow-up chip generation knobs. Inputs are capped so the extra LLM call
+// stays cheap regardless of answer length; the call has its own timeout so a
+// slow model never hangs the SSE stream open.
+const (
+	followUpCount          = 3
+	followUpTimeout        = 15 * time.Second
+	followUpMaxQueryChars  = 500
+	followUpMaxAnswerChars = 2000
+)
+
+// truncateRunes cuts s to at most n runes, suffixing with an ellipsis when
+// truncated.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// parseFollowUps extracts a JSON string array from an LLM reply, tolerating
+// markdown code fences and stray prose around it. Returns nil when nothing
+// parseable is found.
+func parseFollowUps(raw string) []string {
+	start := strings.Index(raw, "[")
+	end := strings.LastIndex(raw, "]")
+	if start < 0 || end <= start {
+		return nil
+	}
+	var items []string
+	if err := json.Unmarshal([]byte(raw[start:end+1]), &items); err != nil {
+		return nil
+	}
+	out := make([]string, 0, followUpCount)
+	for _, q := range items {
+		q = strings.TrimSpace(q)
+		if q != "" {
+			out = append(out, q)
+		}
+		if len(out) >= followUpCount {
+			break
+		}
+	}
+	return out
+}
+
+// generateFollowUps asks the LLM for short follow-up questions based on the
+// just-completed turn. Best-effort: errors and timeouts return nil so the
+// chat stream is never affected by chip generation failures.
+func (s *Service) generateFollowUps(ctx context.Context, provider *llm.LLMModel, query, answer string) []string {
+	ctx, cancel := context.WithTimeout(ctx, followUpTimeout)
+	defer cancel()
+	prompt := fmt.Sprintf(
+		"Based on the Q&A below, generate %d short follow-up questions the user might ask next. "+
+			"Reply with ONLY a JSON array of %d strings, in the same language as the Q&A. No numbering, no explanations.\n\nUser: %s\n\nAssistant: %s",
+		followUpCount, followUpCount,
+		truncateRunes(query, followUpMaxQueryChars),
+		truncateRunes(answer, followUpMaxAnswerChars),
+	)
+	resp, err := s.llm.Chat(ctx, provider.Endpoint, provider.APIKey, clients.ChatRequest{
+		Model:       provider.Model,
+		Messages:    []clients.ChatMessage{{Role: "user", Content: prompt}},
+		Temperature: 0.5,
+		MaxTokens:   200,
+	})
+	if err != nil {
+		log.Printf("[chat] follow-up generation failed: %v", err)
+		return nil
+	}
+	questions := parseFollowUps(resp)
+	if len(questions) == 0 {
+		log.Printf("[chat] follow-up parse empty, raw: %s", truncateRunes(resp, 300))
+	}
+	return questions
+}
+
+// emitFollowUps generates follow-up suggestions for the saved assistant
+// message, persists them on the message row, and pushes a follow_ups event.
+// Called after the done event so chip generation never delays the answer;
+// failures are silent (chips are best-effort).
+func (s *Service) emitFollowUps(ctx context.Context, provider *llm.LLMModel, tenantID, convID, msgID, query, answer string, out chan<- StreamReply) {
+	if msgID == "" || strings.TrimSpace(answer) == "" {
+		return
+	}
+	questions := s.generateFollowUps(ctx, provider, query, answer)
+	if len(questions) == 0 {
+		return
+	}
+	if b, err := json.Marshal(questions); err == nil {
+		if err := s.repo.SetMsgFollowUps(tenantID, convID, msgID, string(b)); err != nil {
+			log.Printf("[chat] save follow-ups failed tenant=%s conv=%s msg=%s: %v", tenantID, convID, msgID, err)
+		}
+	}
+	send(ctx, out, StreamReply{Phase: PhaseFollowUp, Questions: questions})
+}
+
+// recordExecution persists one agent-graph run for the replay page. Failures
+// are logged and swallowed: losing history must never break the chat stream.
+func (s *Service) recordExecution(e *execution.Execution) {
+	if s.execRepo == nil {
+		return
+	}
+	if err := s.execRepo.Create(e); err != nil {
+		log.Printf("[chat] save execution failed tenant=%s kb=%s: %v", e.TenantID, e.KbID, err)
+	}
+}
+
+// newExecution builds an execution record for one graph run with its final
+// outcome. Called via defer from runGraph so every exit path is recorded.
+func newExecution(tenantID, userID, kbID, convID, query, source, status, answer, messageID, terminalType string, trace []agent.TraceStep, totalMs int) *execution.Execution {
+	traceJSON, err := json.Marshal(trace)
+	if err != nil {
+		traceJSON = nil
+	}
+	return &execution.Execution{
+		ID:             uuid.NewString(),
+		TenantID:       tenantID,
+		KbID:           kbID,
+		ConversationID: convID,
+		MessageID:      messageID,
+		UserID:         userID,
+		Source:         source,
+		Status:         status,
+		Query:          query,
+		Answer:         answer,
+		TerminalType:   terminalType,
+		Trace:          string(traceJSON),
+		TotalMs:        totalMs,
 	}
 }
 
@@ -323,6 +458,21 @@ func (s *Service) runGraph(
 	persist bool,
 ) {
 	totalStart := time.Now()
+
+	// Execution recording: one row per graph run with its full trace so the
+	// replay page can re-highlight the walk. status/answer/messageID mutate
+	// through the branches below; the deferred closure reads final values.
+	src := execution.SourceTest
+	if persist {
+		src = execution.SourceChat
+	}
+	var terminal agent.Terminal
+	status := execution.StatusCancelled
+	var answer, messageID string
+	defer func() {
+		s.recordExecution(newExecution(tenantID, userID, kbID, convID, query, src, status, answer, messageID, terminal.Type, terminal.Trace, int(time.Since(totalStart).Milliseconds())))
+	}()
+
 	deps := s.graphDeps(tenantID, kbID, query, persist)
 
 	// Load history for LLM nodes (test mode has no history).
@@ -352,7 +502,7 @@ func (s *Service) runGraph(
 	var retrieveMs int
 	retrieveStart := time.Now()
 
-	terminal := agent.Execute(ctx, def, deps, tenantID, kbID, ec, func(ev agent.ExecutionEvent) {
+	terminal = agent.Execute(ctx, def, deps, tenantID, kbID, ec, func(ev agent.ExecutionEvent) {
 		if ev.Phase == agent.EvWarning && ev.Warning != "" {
 			send(ctx, out, StreamReply{Phase: PhaseWarning, Warning: ev.Warning})
 		}
@@ -376,6 +526,7 @@ func (s *Service) runGraph(
 		if text == "" {
 			text = "（空回复）"
 		}
+		answer = text
 		if !send(ctx, out, StreamReply{Phase: PhaseGenerate, Token: text}) {
 			return
 		}
@@ -390,10 +541,15 @@ func (s *Service) runGraph(
 				log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, convID, err)
 			}
 		}
+		messageID = assistantID
+		status = execution.StatusSuccess
 		send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: &ReplyStats{
 			RetrieveMs: retrieveMs,
 			TotalMs:    int(time.Since(totalStart).Milliseconds()),
 		}, Trace: terminal.Trace})
+		if persist {
+			s.emitFollowUps(ctx, provider, tenantID, convID, assistantID, query, text, out)
+		}
 
 	case agent.NodeLLM:
 		cfg := terminal.LLMCfg
@@ -418,9 +574,13 @@ func (s *Service) runGraph(
 		content, reasoning, usage, generateMs, streamErr, cancelled := s.streamLLM(ctx, out, llmProvider, *cfg, msgs)
 		totalMs := int(time.Since(totalStart).Milliseconds())
 
+		answer = content
 		if streamErr != "" || cancelled {
 			if persist {
 				s.saveAssistant(tenantID, convID, content, cits, nil, reasoning)
+			}
+			if streamErr != "" {
+				status = execution.StatusError
 			}
 			return
 		}
@@ -442,9 +602,15 @@ func (s *Service) runGraph(
 				log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, convID, err)
 			}
 		}
+		messageID = assistantID
+		status = execution.StatusSuccess
 		send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: stats, Trace: terminal.Trace})
+		if persist {
+			s.emitFollowUps(ctx, llmProvider, tenantID, convID, assistantID, query, content, out)
+		}
 
 	default:
+		status = execution.StatusError
 		send(ctx, out, StreamReply{Phase: PhaseError, Error: "agent graph ended without a terminal node"})
 	}
 }

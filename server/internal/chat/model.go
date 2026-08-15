@@ -24,22 +24,25 @@ type Conversation struct {
 // Message is one turn in a conversation. Citations is a JSON-encoded
 // []Citation stored as a string; it is empty for non-assistant messages.
 type Message struct {
-	ID               string    `gorm:"primaryKey;size:36" json:"id"`
-	TenantID         string    `gorm:"size:36;index:idx_msg_tenant_conv_created,priority:1;not null" json:"tenant_id"`
-	ConversationID   string    `gorm:"size:36;index:idx_msg_tenant_conv_created,priority:2;not null" json:"conversation_id"`
-	Role             string    `gorm:"size:32;not null" json:"role"`
-	Content          string    `gorm:"type:text" json:"content"`
-	Reasoning        string    `gorm:"type:text" json:"reasoning,omitempty"`
-	Citations        string    `gorm:"type:text" json:"citations,omitempty"`
-	RetrieveMs       int       `gorm:"default:0" json:"retrieve_ms,omitempty"`
-	GenerateMs       int       `gorm:"default:0" json:"generate_ms,omitempty"`
-	TotalMs          int       `gorm:"default:0" json:"total_ms,omitempty"`
-	PromptTokens     int       `gorm:"default:0" json:"prompt_tokens,omitempty"`
-	CompletionTokens int       `gorm:"default:0" json:"completion_tokens,omitempty"`
-	TotalTokens      int       `gorm:"default:0" json:"total_tokens,omitempty"`
+	ID               string `gorm:"primaryKey;size:36" json:"id"`
+	TenantID         string `gorm:"size:36;index:idx_msg_tenant_conv_created,priority:1;not null" json:"tenant_id"`
+	ConversationID   string `gorm:"size:36;index:idx_msg_tenant_conv_created,priority:2;not null" json:"conversation_id"`
+	Role             string `gorm:"size:32;not null" json:"role"`
+	Content          string `gorm:"type:text" json:"content"`
+	Reasoning        string `gorm:"type:text" json:"reasoning,omitempty"`
+	Citations        string `gorm:"type:text" json:"citations,omitempty"`
+	RetrieveMs       int    `gorm:"default:0" json:"retrieve_ms,omitempty"`
+	GenerateMs       int    `gorm:"default:0" json:"generate_ms,omitempty"`
+	TotalMs          int    `gorm:"default:0" json:"total_ms,omitempty"`
+	PromptTokens     int    `gorm:"default:0" json:"prompt_tokens,omitempty"`
+	CompletionTokens int    `gorm:"default:0" json:"completion_tokens,omitempty"`
+	TotalTokens      int    `gorm:"default:0" json:"total_tokens,omitempty"`
 	// Vote is the user's feedback on an assistant message: "", "up", or
 	// "down". Downvotes surface in analytics for bad-case review.
-	Vote      string    `gorm:"size:8;not null;default:''" json:"vote,omitempty"`
+	Vote string `gorm:"size:8;not null;default:''" json:"vote,omitempty"`
+	// FollowUps stores LLM-generated follow-up suggestions for this
+	// assistant message as a JSON string array, rendered as clickable chips.
+	FollowUps string    `gorm:"type:text" json:"follow_ups,omitempty"`
 	CreatedAt time.Time `gorm:"index:idx_msg_tenant_conv_created,priority:3" json:"created_at"`
 }
 

@@ -81,6 +81,7 @@
     "enabled": "启用",
     "disabled": "禁用",
     "chunks": "分块",
+    "hits": "命中",
     "created": "创建时间",
     "actions": "操作",
     "delete": "删除",
@@ -178,6 +179,28 @@
     "answer_placeholder": "命中后直接返回的答案",
     "match_hint": "相似度 ≥ 80% 时命中。",
     "delete_confirm": "确定删除这条标注？"
+  },
+  "exec": {
+    "title": "执行历史",
+    "desc": "每次 Agent 图执行的完整记录，可回放节点轨迹用于排查与调优。",
+    "source_all": "全部",
+    "source_chat": "正式对话",
+    "source_test": "测试运行",
+    "status_success": "成功",
+    "status_error": "失败",
+    "status_cancelled": "已中断",
+    "col_time": "时间",
+    "col_query": "问题",
+    "col_status": "状态",
+    "col_source": "来源",
+    "col_duration": "耗时",
+    "replay": "回放",
+    "replay_title": "执行回放",
+    "steps": "执行步骤",
+    "edge_traversed": "路径",
+    "no_graph": "当前 Agent 画布为空，无法重放图结构。",
+    "no_record": "该回答产生于执行记录功能上线之前，无回放数据。",
+    "empty": "暂无执行记录。发起一次对话或测试后再来看看。"
   },
   "llm": {
     "title": "模型配置",
@@ -721,7 +744,8 @@
     "feedback_question": "用户问题",
     "feedback_answer": "回答",
     "feedback_user": "用户",
-    "feedback_time": "时间"
+    "feedback_time": "时间",
+    "view_execution": "查看执行"
   },
   "audit": {
     "title": "审计日志",

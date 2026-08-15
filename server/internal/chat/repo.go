@@ -131,6 +131,15 @@ func (r *Repo) SetMsgVote(tenantID, convID, msgID, vote string) error {
 	return nil
 }
 
+// SetMsgFollowUps stores the follow-up suggestions (JSON string array) on one
+// assistant message so they survive history reloads. Scoped to tenant +
+// conversation; a miss is a silent no-op (chips are best-effort).
+func (r *Repo) SetMsgFollowUps(tenantID, convID, msgID, followUps string) error {
+	return r.db.Model(&Message{}).
+		Where("tenant_id = ? AND conversation_id = ? AND id = ?", tenantID, convID, msgID).
+		Update("follow_ups", followUps).Error
+}
+
 func (r *Repo) ListMsgs(tenantID, convID string) ([]*Message, error) {
 	var items []*Message
 	err := r.db.Where("tenant_id = ? AND conversation_id = ?", tenantID, convID).

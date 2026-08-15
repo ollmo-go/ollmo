@@ -33,6 +33,18 @@ function getConvIdFromURL(): string {
   return params.get("c") || "";
 }
 
+// parseFollowUps decodes a message's stored follow-up suggestions (JSON
+// string array). Returns [] on missing/malformed data.
+function parseFollowUps(raw?: string): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((q) => typeof q === "string" && q.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile?: UserProfile | null; isAdmin?: boolean }) {
   const [selectedKb, setSelectedKb] = useState<string>("");
   const [selectedConv, setSelectedConv] = useState<string>("");
@@ -123,6 +135,10 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
   }, [agentData, selectedKb, selectedConv]);
 
   const skipFetchRef = useRef(false);
+  // True while this client is sending its own turn (send -> stream done).
+  // The subscription stream receives the same events back; they are skipped
+  // so the turn is not rendered twice.
+  const selfStreamingRef = useRef(false);
 
   useEffect(() => {
     if (!selectedConv) {
@@ -135,6 +151,85 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     }
     api.listMessages(selectedConv).then((r) => setMessages(r.items)).catch(() => setMessages([]));
   }, [selectedConv]);
+
+  // Observer stream: follow the selected conversation so a turn streamed
+  // from another tab/device renders here live. Self-sent turns are skipped
+  // (the send() POST response already carries the same events). On done the
+  // persisted messages are refetched so the final row (id, citations,
+  // follow-ups) replaces the streamed approximation.
+  useEffect(() => {
+    if (!authed || !selectedConv) return;
+    const controller = new AbortController();
+    const skip = () => selfStreamingRef.current;
+    (async () => {
+      let acc = "";
+      let thinkAcc = "";
+      await consumeChatStream(api.subscribeConversation(selectedConv, controller.signal), {
+        onUser: (msgId, text) => {
+          if (skip()) return;
+          acc = "";
+          thinkAcc = "";
+          setMessages((m) => [
+            ...m,
+            {
+              id: msgId,
+              tenant_id: "",
+              conversation_id: selectedConv,
+              role: "user",
+              content: text,
+              created_at: new Date().toISOString(),
+            },
+          ]);
+          setStreamedText("");
+          setStreamedThinking("");
+          setPendingCitations([]);
+          setStreaming(true);
+        },
+        onCitations: (c) => {
+          if (skip()) return;
+          setPendingCitations(c);
+        },
+        onToken: (tk) => {
+          if (skip()) return;
+          acc += tk;
+          setStreamedText(acc);
+        },
+        onThinking: (tk) => {
+          if (skip()) return;
+          thinkAcc += tk;
+          setStreamedThinking(thinkAcc);
+        },
+        onDone: () => {
+          if (skip()) return;
+          setStreaming(false);
+          setStreamedText("");
+          setStreamedThinking("");
+          setPendingCitations([]);
+          api.listMessages(selectedConv).then((r) => setMessages(r.items)).catch(() => {});
+          mutateConvs();
+        },
+        onFollowUps: () => {
+          if (skip()) return;
+          api.listMessages(selectedConv).then((r) => setMessages(r.items)).catch(() => {});
+        },
+      }).then((res) => {
+        // A remote turn failed mid-stream (error event): end the local
+        // rendering state; the partial reply is persisted server-side, so
+        // refetch shows what was produced.
+        if (res.error && !skip()) {
+          setStreaming(false);
+          setStreamedText("");
+          setStreamedThinking("");
+          setPendingCitations([]);
+          api.listMessages(selectedConv).then((r) => setMessages(r.items)).catch(() => {});
+        }
+      });
+    })();
+    return () => {
+      controller.abort();
+      if (!selfStreamingRef.current) setStreaming(false);
+    };
+  }, [authed, selectedConv, mutateConvs]);
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -307,6 +402,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     setStreamedThinking("");
     setPendingCitations([]);
     setStreaming(true);
+    selfStreamingRef.current = true;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -318,6 +414,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     let streamError = "";
     let doneStats: ReplyStats | undefined;
     let annReply = false;
+    let followUps: string[] = [];
 
     try {
       const stream = api.streamChat(convId, { message: text }, controller.signal);
@@ -331,6 +428,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         onThinking: (tk) => { thinkAcc += tk; setStreamedThinking(thinkAcc); },
         onDone: (id, stats) => { doneMsgId = id; doneStats = stats; },
         onWarning: (w) => { acc += `⚠️ ${w}\n\n`; setStreamedText(acc); },
+        onFollowUps: (qs) => { followUps = qs; },
       });
       streamError = error ?? "";
     } finally {
@@ -355,6 +453,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
             completion_tokens: doneStats?.completion_tokens,
             total_tokens: doneStats?.total_tokens,
             annotation: annReply || undefined,
+            follow_ups: followUps.length ? JSON.stringify(followUps) : undefined,
             created_at: new Date().toISOString(),
           },
         ]);
@@ -364,12 +463,23 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
       setStreamedThinking("");
       setPendingCitations([]);
       setStreaming(false);
+      selfStreamingRef.current = false;
       abortRef.current = null;
       mutateQuota();
     }
   }
 
   const canSend = !!selectedKb && !streaming && draft.trim().length > 0;
+
+  // Index of the last assistant message; follow-up chips render only under it
+  // so history stays clean and chips always track the latest reply.
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
 
   // Vote feedback on an assistant message. Clicking the active icon clears
   // the vote; optimistic update with rollback on failure.
@@ -386,21 +496,6 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
 
   const chatInput = (
     <div className="rounded-2xl border bg-background shadow-sm">
-      <div className="flex items-center gap-2 px-3 pt-2">
-        <select
-          className="h-8 rounded-md border border-input bg-background px-2 text-sm cursor-pointer"
-          value={selectedKb}
-          onChange={(e) => {
-            setSelectedKb(e.target.value);
-            if (selectedConv) selectConv("");
-          }}
-        >
-          <option value="">{t("chat.select_kb")}</option>
-          {kbs?.items?.map((k) => (
-            <option key={k.id} value={k.id}>{k.name}</option>
-          ))}
-        </select>
-      </div>
       <textarea
         ref={textareaRef}
         value={draft}
@@ -419,7 +514,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         placeholder={selectedKb ? t("chat.ask_anything") : t("chat.pick_kb_first")}
         disabled={!selectedKb || streaming}
         rows={1}
-        className="w-full resize-none bg-transparent px-4 py-3 text-sm outline-none max-h-48"
+        className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm outline-none max-h-48"
       />
       <div className="flex items-center justify-between p-2">
         <span className="px-2 text-xs text-muted-foreground">
@@ -427,15 +522,30 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
             ? t("chat.quota_remaining", { used: Math.max(0, msgQuota.quota - msgQuota.remaining), total: msgQuota.quota })
             : ""}
         </span>
-        {streaming ? (
-          <Button size="icon" variant="outline" onClick={stop} aria-label={t("chat.stop")}>
-            <Square className="h-4 w-4" />
-          </Button>
-        ) : (
-          <Button size="icon" onClick={() => send()} disabled={!canSend || quotaExceeded} aria-label={t("chat.send")}>
-            <Send className="h-4 w-4" />
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <select
+            className="h-8 max-w-44 rounded-md border border-input bg-background px-2 text-sm cursor-pointer"
+            value={selectedKb}
+            onChange={(e) => {
+              setSelectedKb(e.target.value);
+              if (selectedConv) selectConv("");
+            }}
+          >
+            <option value="">{t("chat.select_kb")}</option>
+            {kbs?.items?.map((k) => (
+              <option key={k.id} value={k.id}>{k.name}</option>
+            ))}
+          </select>
+          {streaming ? (
+            <Button size="icon" className="h-8 w-8" variant="outline" onClick={stop} aria-label={t("chat.stop")}>
+              <Square className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button size="icon" className="h-8 w-8" onClick={() => send()} disabled={!canSend || quotaExceeded} aria-label={t("chat.send")}>
+              <Send className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -648,15 +758,33 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                 className="max-w-3xl mx-auto space-y-4 pr-2"
                 style={{ paddingBottom: inputBarH + 24 }}
               >
-                {messages.map((m) => (
-                  <MessageBubble
-                    key={m.id}
-                    message={m}
-                    kbId={selectedKb}
-                    onEditSend={m.role === "user" ? (text) => send(text) : undefined}
-                    onVote={m.role === "assistant" && m.id !== "greeting" ? (v) => vote(m, v) : undefined}
-                  />
-                ))}
+                {messages.map((m, i) => {
+                  const chips = !streaming && m.role === "assistant" && i === lastAssistantIdx ? parseFollowUps(m.follow_ups) : [];
+                  return (
+                    <div key={m.id}>
+                      <MessageBubble
+                        message={m}
+                        kbId={selectedKb}
+                        onEditSend={m.role === "user" ? (text) => send(text) : undefined}
+                        onVote={m.role === "assistant" && m.id !== "greeting" ? (v) => vote(m, v) : undefined}
+                      />
+                      {chips.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {chips.map((q) => (
+                            <button
+                              key={q}
+                              onClick={() => send(q)}
+                              disabled={streaming || quotaExceeded}
+                              className="rounded-full border border-border bg-background px-4 py-2 text-sm text-foreground hover:bg-accent hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 {streaming && (
                   <MessageBubble
                     message={{

@@ -9,6 +9,7 @@ import (
 
 	"ollmo/ollmo/internal/agent"
 	"ollmo/ollmo/internal/annotation"
+	"ollmo/ollmo/internal/execution"
 	"ollmo/ollmo/internal/llm"
 	"ollmo/ollmo/internal/search"
 	"ollmo/ollmo/pkg/clients"
@@ -70,10 +71,12 @@ type Service struct {
 	onConvDel ConversationDeletedHook
 	msgQuota  MessageQuotaChecker
 	annMatch  AnnotationMatcher
+	execRepo  *execution.Repo
+	hub       *Hub
 }
 
 func NewService(repo *Repo, searchSvc *search.Service, llmRepo *llm.Repo, llm *clients.LLMClient) *Service {
-	return &Service{repo: repo, searchSvc: searchSvc, llmRepo: llmRepo, llm: llm, history: 30}
+	return &Service{repo: repo, searchSvc: searchSvc, llmRepo: llmRepo, llm: llm, history: 30, hub: NewHub()}
 }
 
 // AnnotationMatcher returns the curated answer when the query closely
@@ -86,6 +89,13 @@ type AnnotationMatcher interface {
 // the stream short-circuits retrieval + LLM and returns the stored answer.
 func (s *Service) WithAnnotations(m AnnotationMatcher) *Service {
 	s.annMatch = m
+	return s
+}
+
+// WithExecutionRepo wires the execution recorder. When set, every agent-graph
+// run (chat and test) is persisted with its full node trace for later replay.
+func (s *Service) WithExecutionRepo(r *execution.Repo) *Service {
+	s.execRepo = r
 	return s
 }
 
@@ -312,8 +322,8 @@ type SendInput struct {
 }
 
 // StreamReply is what each SSE event carries. Phase is one of: retrieve,
-// generate, done, error, warning. Token is set during generate; Done closes
-// the stream.
+// generate, done, follow_ups, error, warning. Token is set during generate;
+// Done closes the stream; follow_ups may arrive after done.
 type StreamReply struct {
 	Phase     string            `json:"phase"`
 	Token     string            `json:"token,omitempty"`
@@ -323,6 +333,9 @@ type StreamReply struct {
 	Warning   string            `json:"warning,omitempty"`
 	Stats     *ReplyStats       `json:"stats,omitempty"`
 	Trace     []agent.TraceStep `json:"trace,omitempty"`
+	// Questions carries follow-up suggestions (phase follow_ups), emitted
+	// after done so the answer is never delayed by chip generation.
+	Questions []string `json:"questions,omitempty"`
 	// Annotation marks generate/done events whose content came from a
 	// matched annotation reply rather than the LLM.
 	Annotation bool `json:"annotation,omitempty"`
@@ -343,8 +356,14 @@ const (
 	PhaseThinking = "thinking"
 	PhaseGenerate = "generate"
 	PhaseDone     = "done"
+	PhaseFollowUp = "follow_ups"
 	PhaseError    = "error"
 	PhaseWarning  = "warning"
+	// PhaseUser opens a remote turn on the subscription stream only: it
+	// carries the persisted user message (Token) and its id so other
+	// tabs/devices can render the question before tokens arrive. The
+	// sending client never sees it (it rendered the message locally).
+	PhaseUser = "user"
 )
 
 // Stream sends a user message, retrieves context, streams the assistant reply
@@ -395,8 +414,38 @@ func (s *Service) Stream(ctx context.Context, tenantID, userID, convID string, i
 	}
 
 	out := make(chan StreamReply, 16)
-	go s.runStream(ctx, tenantID, conv, in, provider, userMsg, out, cfg)
+	src := make(chan StreamReply, 16)
+	go s.runStream(ctx, tenantID, conv, in, provider, userMsg, src, cfg)
+	// Fan every reply out to conversation subscribers (other tabs/devices
+	// following via Subscribe) while forwarding to the sending client. The
+	// user event opens the remote turn so subscribers render the question
+	// before tokens arrive.
+	go func() {
+		defer close(out)
+		s.hub.Publish(convID, StreamReply{Phase: PhaseUser, MessageID: userMsg.ID, Token: in.Message})
+		for r := range src {
+			s.hub.Publish(convID, r)
+			if !send(ctx, out, r) {
+				// Sending client disconnected; keep draining src so
+				// runStream can finish and persist its partial work.
+				for range src {
+				}
+				return
+			}
+		}
+	}()
 	return out, nil
+}
+
+// Subscribe returns a live event channel for a conversation, letting an
+// additional client (another tab/device) follow the same stream the sending
+// client sees. The caller must pass the channel to Hub.Unsubscribe once it
+// stops reading (connection closed).
+func (s *Service) Subscribe(tenantID, userID, convID string) (chan StreamReply, error) {
+	if _, err := s.repo.FindConvOwned(tenantID, userID, convID); err != nil {
+		return nil, err
+	}
+	return s.hub.Subscribe(convID), nil
 }
 
 // TestStream runs the agent pipeline (retrieval + LLM streaming) without

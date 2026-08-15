@@ -19,6 +19,7 @@ import (
 	"ollmo/ollmo/internal/chat"
 	"ollmo/ollmo/internal/doc"
 	"ollmo/ollmo/internal/embedding"
+	"ollmo/ollmo/internal/execution"
 	"ollmo/ollmo/internal/graph"
 	"ollmo/ollmo/internal/install"
 	"ollmo/ollmo/internal/invitation"
@@ -474,6 +475,13 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	// Knowledge graph entities (GraphRAG).
 	kbGrp.Get("/:kbId/entities", kbRead, graphHandler.List)
 
+	// Execution history: persisted agent-graph runs for replay.
+	executionRepo := execution.NewRepo(deps.DB)
+	executionHandler := execution.NewHandler(executionRepo)
+	kbGrp.Get("/:kbId/executions", kbRead, executionHandler.List)
+	kbGrp.Get("/:kbId/executions/by-message/:messageId", kbRead, executionHandler.GetByMessage)
+	protected.Get("/executions/:id", executionHandler.Get)
+
 	// Chat: conversations and messages with SSE streaming.
 	memorySvc := memory.NewService(memory.NewRepo(deps.DB), chat.NewRepo(deps.DB), llmRepo, deps.LLM).
 		WithAsynq(deps.Asynq)
@@ -517,7 +525,8 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 			memorySvc.DeleteByConversation(tenantID, convID)
 		}).
 		WithMessageQuota(quotaChecker).
-		WithAnnotations(annSvc)
+		WithAnnotations(annSvc).
+		WithExecutionRepo(executionRepo)
 	chatHandler := chat.NewHandler(chatSvc)
 	protected.Post("/knowledge-bases/:kbId/conversations", kbRead, chatHandler.Create)
 	protected.Get("/conversations", chatHandler.List)
@@ -529,6 +538,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	protected.Post("/conversations/:id/messages/:messageId/vote", chatHandler.VoteMessage)
 	protected.Delete("/conversations/:id", chatHandler.Delete)
 	protected.Post("/conversations/:id/messages/stream", chatHandler.Stream)
+	protected.Get("/conversations/:id/stream", chatHandler.Subscribe)
 	protected.Post("/knowledge-bases/:kbId/test-chat", kbRead, chatHandler.TestChat)
 	protected.Post("/knowledge-bases/:kbId/debug-node", kbRead, chatHandler.DebugNode)
 	protected.Get("/quota/messages", chatHandler.MessageQuota)
