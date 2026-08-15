@@ -1,6 +1,7 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -10,7 +11,7 @@ import {
   useReactFlow,
   type EdgeProps,
 } from "reactflow";
-import { Search, Brain, MessageSquare, GitBranch, Split, Check, X, AlertCircle, StickyNote } from "lucide-react";
+import { Search, Brain, MessageSquare, GitBranch, Split, Check, Plus, X, AlertCircle, StickyNote } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { normalizeCategories } from "./agent-config-panel";
 
@@ -228,6 +229,16 @@ export const agentNodeTypes = {
 
 // LabeledEdge renders the branch label as an HTML badge via EdgeLabelRenderer
 // so theme CSS variables resolve correctly (SVG label bg falls back to black).
+// Hovering the edge reveals a "+" under the midpoint that inserts a new node
+// between source and target without deleting and re-wiring by hand.
+const INSERTABLE_NODES: { type: string; labelKey: string; icon: React.ReactNode; color: string }[] = [
+  { type: "retrieval", labelKey: "agent.node_retrieval", icon: <Search className="h-3.5 w-3.5" />, color: "text-emerald-500" },
+  { type: "llm", labelKey: "agent.node_llm", icon: <Brain className="h-3.5 w-3.5" />, color: "text-blue-500" },
+  { type: "message", labelKey: "agent.node_message", icon: <MessageSquare className="h-3.5 w-3.5" />, color: "text-cyan-500" },
+  { type: "condition", labelKey: "agent.node_condition", icon: <GitBranch className="h-3.5 w-3.5" />, color: "text-amber-500" },
+  { type: "classifier", labelKey: "agent.node_classifier", icon: <Split className="h-3.5 w-3.5" />, color: "text-violet-500" },
+];
+
 const LabeledEdge = memo(function LabeledEdge({
   id,
   sourceX,
@@ -239,9 +250,15 @@ const LabeledEdge = memo(function LabeledEdge({
   markerEnd,
   label,
   selected,
+  data,
 }: EdgeProps) {
   const { deleteElements } = useReactFlow();
   const t = useTranslations();
+  const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Viewport-space position of the open menu, anchored under the + button.
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const onInsertNode = (data as { onInsertNode?: (type: string) => void } | undefined)?.onInsertNode;
   // Branch semantics: condition-true edges read as success (green check),
   // false as failure (red cross). Legacy spellings stay recognized.
   const isTrue = label === t("agent.branch_true") || label === "true" || label === "条件成立";
@@ -258,12 +275,24 @@ const LabeledEdge = memo(function LabeledEdge({
     e.stopPropagation();
     deleteElements({ edges: [{ id }] });
   };
+  const showInsert = (hovered || selected || menuOpen) && !!onInsertNode;
   return (
     <>
       <BaseEdge
         path={edgePath}
         markerEnd={markerEnd}
         style={{ strokeWidth: selected ? 2.5 : 1.5 }}
+      />
+      {/* Wide invisible stroke so hovering the edge (not just the 1.5px line)
+          reveals the insert button. */}
+      <path
+        d={edgePath}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={20}
+        className="react-flow__edge-interaction"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       />
       <EdgeLabelRenderer>
         <div
@@ -302,6 +331,70 @@ const LabeledEdge = memo(function LabeledEdge({
             </button>
           ) : null}
         </div>
+        {showInsert && (
+          <div
+            style={{
+              position: "absolute",
+              transform: `translate(-50%, 0) translate(${labelX}px, ${labelY + 14}px)`,
+              pointerEvents: "all",
+            }}
+            className="nodrag nopan"
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (menuOpen) {
+                  setMenuOpen(false);
+                  setMenuPos(null);
+                  return;
+                }
+                // Anchor the portal menu to the + button's own screen rect —
+                // fixed positioning needs viewport coords, not flow coords.
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setMenuPos({ x: r.left + r.width / 2, y: r.bottom + 4 });
+                setMenuOpen(true);
+              }}
+              title={t("agent.insert_node")}
+              aria-label={t("agent.insert_node")}
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm hover:border-primary hover:text-primary transition-colors"
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+        {menuOpen && menuPos &&
+          createPortal(
+            <>
+              {/* Click-away backdrop closing the menu from anywhere. */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => { setMenuOpen(false); setMenuPos(null); }}
+              />
+              {/* Portaled to body: the edge-label layer sits below the node
+                  layer, so an in-place menu gets covered by nearby nodes. */}
+              <div
+                className="fixed z-50 rounded-md border border-border bg-popover shadow-md py-1 w-40"
+                style={{ left: menuPos.x, top: menuPos.y, transform: "translateX(-50%)" }}
+              >
+                {INSERTABLE_NODES.map((item) => (
+                  <button
+                    key={item.type}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpen(false);
+                      setMenuPos(null);
+                      onInsertNode!(item.type);
+                    }}
+                    className="flex w-full items-center gap-2 text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+                  >
+                    <span className={item.color}>{item.icon}</span>
+                    {t(item.labelKey)}
+                  </button>
+                ))}
+              </div>
+            </>,
+            document.body
+          )}
       </EdgeLabelRenderer>
     </>
   );

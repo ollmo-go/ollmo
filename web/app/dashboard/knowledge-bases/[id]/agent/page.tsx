@@ -18,6 +18,7 @@ import ReactFlow, {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStore,
 } from "reactflow";
 import useSWR from "swr";
 import dagre from "dagre";
@@ -382,6 +383,108 @@ function layoutNodes(nodes: Node[], edges: Edge[]): Node[] {
   });
 }
 
+// --- Drag alignment guides (FastGPT-style) ---
+// While dragging, snap the node's left/center/right (and top/center/bottom)
+// to any other node's within a few pixels, and report the guide line that
+// spans both nodes so the canvas can render it.
+const SNAP_PX = 6;
+
+type GuideLine =
+  | { hLine: { y: number; x1: number; x2: number }; vLine?: undefined }
+  | { vLine: { x: number; y1: number; y2: number }; hLine?: undefined }
+  | { hLine: { y: number; x1: number; x2: number }; vLine: { x: number; y1: number; y2: number } }
+  | { hLine?: undefined; vLine?: undefined };
+
+function snapToGuides(dragged: Node, others: Node[]): {
+  position: { x: number; y: number };
+  guides: GuideLine;
+} {
+  const dw = dragged.width ?? NODE_W;
+  const dh = dragged.height ?? NODE_H;
+  let x = dragged.position.x;
+  let y = dragged.position.y;
+  let bestDX = SNAP_PX + 1;
+  let bestDY = SNAP_PX + 1;
+  let vLine: { x: number; y1: number; y2: number } | undefined;
+  let hLine: { y: number; x1: number; x2: number } | undefined;
+
+  for (const o of others) {
+    if (o.id === dragged.id) continue;
+    const ow = o.width ?? NODE_W;
+    const oh = o.height ?? NODE_H;
+    // Vertical guide: align dragged's left / center / right edge to o's.
+    for (const ox of [o.position.x, o.position.x + ow / 2, o.position.x + ow]) {
+      for (let i = 0; i < 3; i++) {
+        const anchor = x + (i === 0 ? 0 : i === 1 ? dw / 2 : dw);
+        const d = Math.abs(ox - anchor);
+        if (d <= SNAP_PX && d < bestDX) {
+          bestDX = d;
+          x = ox - (i === 0 ? 0 : i === 1 ? dw / 2 : dw);
+          vLine = {
+            x: ox,
+            y1: Math.min(y, o.position.y),
+            y2: Math.max(y + dh, o.position.y + oh),
+          };
+        }
+      }
+    }
+    // Horizontal guide: align dragged's top / center / bottom edge to o's.
+    for (const oy of [o.position.y, o.position.y + oh / 2, o.position.y + oh]) {
+      for (let i = 0; i < 3; i++) {
+        const anchor = y + (i === 0 ? 0 : i === 1 ? dh / 2 : dh);
+        const d = Math.abs(oy - anchor);
+        if (d <= SNAP_PX && d < bestDY) {
+          bestDY = d;
+          y = oy - (i === 0 ? 0 : i === 1 ? dh / 2 : dh);
+          hLine = {
+            y: oy,
+            x1: Math.min(x, o.position.x),
+            x2: Math.max(x + dw, o.position.x + ow),
+          };
+        }
+      }
+    }
+  }
+  return { position: { x, y }, guides: { hLine, vLine } as GuideLine };
+}
+
+// GuideLineOverlay draws the active snap guides as 1px lines. Flow
+// coordinates are converted with the live viewport transform so the lines
+// track pan/zoom. Rendered as a sibling overlay (not a ReactFlow child) to
+// avoid depending on where ReactFlow mounts arbitrary children.
+function GuideLineOverlay({ guides }: { guides: GuideLine }) {
+  const transform = useStore((s) => s.transform);
+  const { hLine, vLine } = guides;
+  if (!hLine && !vLine) return null;
+  const [tx, ty, zoom] = transform;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10">
+      {vLine && (
+        <div
+          className="absolute bg-primary/70"
+          style={{
+            left: vLine.x * zoom + tx,
+            top: vLine.y1 * zoom + ty,
+            width: 1,
+            height: (vLine.y2 - vLine.y1) * zoom,
+          }}
+        />
+      )}
+      {hLine && (
+        <div
+          className="absolute bg-primary/70"
+          style={{
+            left: hLine.x1 * zoom + tx,
+            top: hLine.y * zoom + ty,
+            height: 1,
+            width: (hLine.x2 - hLine.x1) * zoom,
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // validateGraph returns per-node problems shown as red badges on the canvas.
 // Save still succeeds (with a warning); running the agent is blocked instead.
 function validateGraph(
@@ -600,6 +703,58 @@ function AgentCanvas() {
     [setEdges, takeSnapshot]
   );
 
+  // Insert a node of `type` in the middle of an edge (edge "+" button): the
+  // original edge is replaced by source→new + new→target, keeping the source
+  // branch label so condition/classifier routing stays intact.
+  const insertOnEdge = useCallback(
+    (edgeId: string, type: string) => {
+      const edge = edges.find((e) => e.id === edgeId);
+      if (!edge) return;
+      const src = nodes.find((n) => n.id === edge.source);
+      const dst = nodes.find((n) => n.id === edge.target);
+      takeSnapshot();
+      const id = `n${Date.now()}`;
+      setNodes((nds) => [
+        ...nds,
+        {
+          id,
+          type,
+          position: {
+            x: src && dst ? (src.position.x + dst.position.x) / 2 : 200,
+            y: src && dst ? (src.position.y + dst.position.y) / 2 : 150,
+          },
+          data: { ...DEFAULT_NODE_DATA[type], slug: nextSlug(nds, type) },
+        },
+      ]);
+      setEdges((eds) => [
+        ...eds.filter((e) => e.id !== edgeId),
+        { id: `e-${edge.source}-${id}`, source: edge.source, target: id, type: "labeled", label: edge.label },
+        { id: `e-${id}-${edge.target}`, source: id, target: edge.target, type: "labeled" },
+      ]);
+      setSelectedId(id);
+      setSelectedEdgeId(null);
+      setDirty(true);
+    },
+    [edges, nodes, setNodes, setEdges, takeSnapshot]
+  );
+
+  // Drag alignment: snap the dragged node to guides from other nodes and
+  // show the matching 1px reference lines; cleared when the drag ends.
+  const [guides, setGuides] = useState<GuideLine>({});
+  const onNodeDrag = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      const { position, guides: g } = snapToGuides(
+        node,
+        nodes.filter((n) => n.id !== node.id)
+      );
+      setGuides(g);
+      if (position.x !== node.position.x || position.y !== node.position.y) {
+        setNodes((nds) => nds.map((n) => (n.id === node.id ? { ...n, position } : n)));
+      }
+    },
+    [nodes, setNodes]
+  );
+
   function addNode(type: string) {
     takeSnapshot();
     const id = `n${Date.now()}`;
@@ -743,13 +898,15 @@ function AgentCanvas() {
   }, [edges, setNodes, fitView, takeSnapshot]);
 
   const displayEdges = useMemo(() => {
-    if (traceEdges.size === 0) return edges;
+    // onInsertNode is render-time only (edge "+" menu); fromFlow saves the
+    // raw edges state, so callbacks never reach the persisted definition.
     return edges.map((e) => ({
       ...e,
       animated: traceEdges.has(e.id),
       className: traceEdges.has(e.id) ? "agent-trace-edge" : undefined,
+      data: { onInsertNode: (type: string) => insertOnEdge(e.id, type) },
     }));
-  }, [edges, traceEdges]);
+  }, [edges, traceEdges, insertOnEdge]);
 
   return (
     <div>
@@ -883,6 +1040,8 @@ function AgentCanvas() {
                   onConnect={onConnect}
                   onEdgeUpdate={onEdgeUpdate}
                   onNodeDragStart={() => takeSnapshot()}
+                  onNodeDrag={onNodeDrag}
+                  onNodeDragStop={() => setGuides({})}
                   onNodesDelete={() => { takeSnapshot(); setDirty(true); }}
                   onEdgesDelete={() => { takeSnapshot(); setDirty(true); }}
                   nodeTypes={agentNodeTypes}
@@ -903,6 +1062,7 @@ function AgentCanvas() {
                   <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
                   <Controls showInteractive={false} />
                 </ReactFlow>
+                <GuideLineOverlay guides={guides} />
               </div>
             </CardContent>
           </Card>
