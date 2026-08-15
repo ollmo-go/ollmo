@@ -353,6 +353,7 @@ function ProviderEditor({
   onClose: (changed: boolean) => void;
 }) {
   const t = useTranslations();
+  const [name, setName] = useState(card.name);
   const [apiKey, setApiKey] = useState("");
   const [endpoint, setEndpoint] = useState(card.endpoint);
   const [chatModels, setChatModels] = useState<DraftModel[]>(() =>
@@ -415,8 +416,10 @@ function ProviderEditor({
     setBusy(true);
     try {
       const key = apiKey.trim();
-      if (key || endpoint !== card.endpoint) {
+      const nameChanged = name.trim() !== "" && name.trim() !== card.name;
+      if (nameChanged || key || endpoint !== card.endpoint) {
         await api.providers.update(card.id, {
+          ...(nameChanged ? { name: name.trim() } : {}),
           ...(endpoint !== card.endpoint ? { endpoint } : {}),
           ...(key ? { api_key: key } : {}),
         });
@@ -467,6 +470,15 @@ function ProviderEditor({
 
   return (
     <div className="space-y-4">
+      <div className="space-y-2">
+        <div className="text-sm font-medium">{t("settings.provider_name")}</div>
+        <Input
+          value={name}
+          placeholder={t("settings.provider_name_placeholder")}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </div>
+
       <div className="space-y-2">
         <div className="text-sm font-medium">{t("settings.provider_key_input")}</div>
         <Input

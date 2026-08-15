@@ -290,6 +290,8 @@
     "provider_add_custom": "Add a custom provider",
     "provider": "Provider",
     "provider_custom_tag": "custom",
+    "provider_name": "Provider name",
+    "provider_name_placeholder": "e.g. SiliconFlow",
     "provider_key_input": "API Key",
     "provider_status_ok": "Connected",
     "provider_status_untested": "Key configured, test not passed yet",

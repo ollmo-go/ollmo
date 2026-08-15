@@ -289,6 +289,8 @@
     "provider_add_custom": "添加自定义提供方",
     "provider": "提供方",
     "provider_custom_tag": "自定义",
+    "provider_name": "提供方名称",
+    "provider_name_placeholder": "例如 SiliconFlow",
     "provider_key_input": "API 密钥",
     "provider_status_ok": "连接正常",
     "provider_status_untested": "已配置密钥，尚未测试成功",
