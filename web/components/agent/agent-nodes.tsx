@@ -14,22 +14,18 @@ import {
 import { Search, Brain, MessageSquare, GitBranch, Split, Check, Plus, X, AlertCircle, StickyNote } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { normalizeCategories } from "./agent-config-panel";
+import { AGENT_NODE_ACCENTS } from "@/lib/ui-colors";
 
 interface NodeData {
   [key: string]: unknown;
 }
 
 // Per-node-type accent colors: classifier (routing) violet, retrieval (data)
-// emerald, condition (decision) amber, llm (AI) blue, message (output) cyan.
+// emerald, condition (decision) amber, llm (AI) teal, message (output) cyan.
 type NodeAccent = { color: string; icon: string };
 
-const accents: Record<string, NodeAccent> = {
-  classifier: { color: "#8b5cf6", icon: "text-violet-500" },
-  retrieval: { color: "#10b981", icon: "text-emerald-500" },
-  condition: { color: "#f59e0b", icon: "text-amber-500" },
-  llm: { color: "#0d9488", icon: "text-teal-500" },
-  message: { color: "#06b6d4", icon: "text-cyan-500" },
-};
+// Node accent colors live in lib/ui-colors (hex for react-flow + icon class).
+const accents = AGENT_NODE_ACCENTS;
 
 function nodeShell(
   label: string,
@@ -243,11 +239,11 @@ export const NODE_TYPE_LABEL_KEY: Record<string, string> = {
 // Hovering the edge reveals a "+" under the midpoint that inserts a new node
 // between source and target without deleting and re-wiring by hand.
 const INSERTABLE_NODES: { type: string; labelKey: string; icon: React.ReactNode; color: string }[] = [
-  { type: "retrieval", labelKey: "agent.node_retrieval", icon: <Search className="h-3.5 w-3.5" />, color: "text-emerald-500" },
-  { type: "llm", labelKey: "agent.node_llm", icon: <Brain className="h-3.5 w-3.5" />, color: "text-teal-500" },
-  { type: "message", labelKey: "agent.node_message", icon: <MessageSquare className="h-3.5 w-3.5" />, color: "text-cyan-500" },
-  { type: "condition", labelKey: "agent.node_condition", icon: <GitBranch className="h-3.5 w-3.5" />, color: "text-amber-500" },
-  { type: "classifier", labelKey: "agent.node_classifier", icon: <Split className="h-3.5 w-3.5" />, color: "text-violet-500" },
+  { type: "retrieval", labelKey: "agent.node_retrieval", icon: <Search className="h-3.5 w-3.5" />, color: AGENT_NODE_ACCENTS.retrieval.icon },
+  { type: "llm", labelKey: "agent.node_llm", icon: <Brain className="h-3.5 w-3.5" />, color: AGENT_NODE_ACCENTS.llm.icon },
+  { type: "message", labelKey: "agent.node_message", icon: <MessageSquare className="h-3.5 w-3.5" />, color: AGENT_NODE_ACCENTS.message.icon },
+  { type: "condition", labelKey: "agent.node_condition", icon: <GitBranch className="h-3.5 w-3.5" />, color: AGENT_NODE_ACCENTS.condition.icon },
+  { type: "classifier", labelKey: "agent.node_classifier", icon: <Split className="h-3.5 w-3.5" />, color: AGENT_NODE_ACCENTS.classifier.icon },
 ];
 
 const LabeledEdge = memo(function LabeledEdge({

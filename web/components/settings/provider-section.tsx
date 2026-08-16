@@ -14,6 +14,7 @@ import { api, CatalogProvider, DiscoveredModel, ProviderCard, ProviderModelRef }
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { useConfirm } from "@/components/ui/confirm";
+import { STATUS_DOT } from "@/lib/ui-colors";
 
 export type ProviderKind = "llm" | "embedding" | "rerank";
 
@@ -231,10 +232,10 @@ export function ProviderSection() {
                           className={cn(
                             "h-2 w-2 shrink-0 rounded-full",
                             !card.has_key
-                              ? "bg-muted-foreground/40"
+                              ? STATUS_DOT.idle
                               : testedOk
-                                ? "bg-emerald-500"
-                                : "bg-amber-500"
+                                ? STATUS_DOT.ok
+                                : STATUS_DOT.warn
                           )}
                         />
                         <span className="truncate font-medium">{card.name}</span>

@@ -31,14 +31,10 @@ import {
   type QuotaItem,
 } from "@/lib/api";
 import { useTranslations } from "next-intl";
+import { ICON_BADGE, capacityBarColor } from "@/lib/ui-colors";
 
-const BADGE: Record<string, string> = {
-  blue: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400",
-  purple: "bg-purple-50 text-purple-600 dark:bg-purple-950/50 dark:text-purple-400",
-  orange: "bg-orange-50 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400",
-  indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400",
-  green: "bg-green-50 text-green-600 dark:bg-green-950/50 dark:text-green-400",
-};
+// Icon badge variants live in lib/ui-colors (shared across dashboard pages).
+const BADGE = ICON_BADGE;
 
 function IconBadge({ icon: Icon, color }: { icon: LucideIcon; color: string }) {
   return (
@@ -49,9 +45,7 @@ function IconBadge({ icon: Icon, color }: { icon: LucideIcon; color: string }) {
 }
 
 function quotaBarColor(pct: number) {
-  if (pct >= 90) return "bg-red-500 dark:bg-red-400";
-  if (pct >= 60) return "bg-amber-500 dark:bg-amber-400";
-  return "bg-green-500 dark:bg-green-400";
+  return capacityBarColor(pct);
 }
 
 export default function DashboardHome() {
@@ -213,7 +207,7 @@ export default function DashboardHome() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <QuickCard
             icon={BookOpen}
-            color="blue"
+            color="teal"
             label={t("nav.knowledge_bases")}
             value={kbData?.total ?? 0}
             href="/dashboard/knowledge-bases"

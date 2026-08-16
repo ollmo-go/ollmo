@@ -6,14 +6,9 @@ import { useTranslations } from "next-intl";
 import { api, BillMine } from "@/lib/api";
 import { formatCost, formatTime, formatTokens } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { BILL_SOURCE } from "@/lib/ui-colors";
 
-// Source badge colors match the dashboard bills page.
-const SOURCE: Record<string, { key: string; cls: string }> = {
-  chat: { key: "bill.source_chat", cls: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400" },
-  classifier: { key: "bill.source_classifier", cls: "bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400" },
-  intermediate: { key: "bill.source_intermediate", cls: "bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400" },
-  followups: { key: "bill.source_followups", cls: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/50 dark:text-cyan-400" },
-};
+const SOURCE = BILL_SOURCE;
 
 function Stat({
   icon: Icon,
@@ -103,7 +98,7 @@ export function MyUsage() {
                   <span
                     className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium shrink-0 ${src.cls}`}
                   >
-                    {t(src.key)}
+                    {t(src.labelKey)}
                   </span>
                   <span className="truncate min-w-0">{r.model_name}</span>
                   <span className="ml-auto text-xs text-muted-foreground tabular-nums shrink-0">

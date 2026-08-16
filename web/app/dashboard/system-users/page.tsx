@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfirm } from "@/components/ui/confirm";
 import { formatTime } from "@/lib/utils";
+import { STATUS_BADGE } from "@/lib/ui-colors";
 
 export default function SystemUsersPage() {
   const t = useTranslations();
@@ -108,7 +109,7 @@ export default function SystemUsersPage() {
                         <span
                           className={`px-2 py-0.5 rounded text-xs ${
                             u.role === "admin"
-                              ? "bg-teal-100 text-teal-700"
+                              ? STATUS_BADGE.info
                               : "bg-muted text-muted-foreground"
                           }`}
                         >
@@ -119,8 +120,8 @@ export default function SystemUsersPage() {
                         <span
                           className={`px-2 py-0.5 rounded text-xs ${
                             u.status === "active"
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-red-100 text-red-700"
+                              ? STATUS_BADGE.ok
+                              : STATUS_BADGE.danger
                           }`}
                         >
                           {t(`team.${u.status}`)}
@@ -128,7 +129,7 @@ export default function SystemUsersPage() {
                       </td>
                       <td className="py-2 pr-4">
                         {u.is_super_admin ? (
-                          <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">
+                          <span className={`px-2 py-0.5 rounded text-xs ${STATUS_BADGE.warn}`}>
                             {t("users.super_admin")}
                           </span>
                         ) : (

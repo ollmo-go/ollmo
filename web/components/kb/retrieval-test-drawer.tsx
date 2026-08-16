@@ -9,6 +9,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { api, Paginated, ProviderCard, RerankModel, SearchResult, SearchHit } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import { BADGE_SOFT, BADGE_SOLID } from "@/lib/ui-colors";
 import { ProviderModelSelect } from "@/components/ui/provider-model-select";
 
 export function RetrievalTestDrawer({ kbId, onClose }: { kbId: string; onClose: () => void }) {
@@ -181,7 +182,7 @@ function ResultView({ result, debug }: { result: SearchResult; debug: boolean })
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2 text-xs">
-        <Badge color="blue">
+        <Badge color="teal">
           {result.hits.length} {t("retrieval_test.hits")}
         </Badge>
         {result.sparse && (
@@ -283,7 +284,7 @@ function HitCard({
           )}
           {debug && (
             <div className="flex flex-wrap gap-2 mt-2 text-xs">
-              <ScoreBadge label={t("retrieval_test.score_final")} value={hit.score} color="blue" />
+              <ScoreBadge label={t("retrieval_test.score_final")} value={hit.score} color="teal" />
               {fusedScore !== undefined && (
                 <ScoreBadge label="RRF" value={fusedScore} color="green" />
               )}
@@ -301,29 +302,17 @@ function HitCard({
   );
 }
 
-function Badge({ children, color }: { children: React.ReactNode; color: "blue" | "green" | "purple" | "amber" }) {
-  const colors = {
-    blue: "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
-    green: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-    purple: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-    amber: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-  };
+function Badge({ children, color }: { children: React.ReactNode; color: "teal" | "green" | "purple" | "amber" }) {
   return (
-    <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", colors[color])}>
+    <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", BADGE_SOLID[color])}>
       {children}
     </span>
   );
 }
 
-function ScoreBadge({ label, value, color }: { label: string; value: number; color: "blue" | "green" | "purple" | "amber" }) {
-  const colors = {
-    blue: "bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400",
-    green: "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400",
-    purple: "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400",
-    amber: "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400",
-  };
+function ScoreBadge({ label, value, color }: { label: string; value: number; color: "teal" | "green" | "purple" | "amber" }) {
   return (
-    <span className={cn("px-1.5 py-0.5 rounded font-mono", colors[color])}>
+    <span className={cn("px-1.5 py-0.5 rounded font-mono", BADGE_SOFT[color])}>
       {label}: {value.toFixed(4)}
     </span>
   );

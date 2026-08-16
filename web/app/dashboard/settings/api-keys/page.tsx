@@ -13,6 +13,7 @@ import { api, APIKey, APIKeyWithSecret } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { useConfirm } from "@/components/ui/confirm";
 import { formatTime } from "@/lib/utils";
+import { STATUS_BADGE } from "@/lib/ui-colors";
 
 export default function ApiKeysPage() {
   const t = useTranslations();
@@ -160,7 +161,7 @@ export default function ApiKeysPage() {
                       <span
                         className={`px-2 py-0.5 rounded text-xs ${
                           k.status === "active"
-                            ? "bg-emerald-100 text-emerald-700"
+                            ? STATUS_BADGE.ok
                             : "bg-muted text-muted-foreground"
                         }`}
                       >

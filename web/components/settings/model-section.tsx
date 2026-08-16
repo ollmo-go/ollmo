@@ -14,6 +14,7 @@ import { DiscoveredModel, Paginated } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { useConfirm } from "@/components/ui/confirm";
+import { STATUS_BADGE } from "@/lib/ui-colors";
 
 export interface BaseModel {
   id: string;
@@ -211,7 +212,7 @@ export function ModelSection<T extends BaseModel>({
                 <div className="font-medium flex items-center gap-2">
                   {p.name}
                   {p.is_default && (
-                    <span className="px-1.5 py-0.5 rounded text-xs bg-emerald-100 text-emerald-700">
+                    <span className={`px-1.5 py-0.5 rounded text-xs ${STATUS_BADGE.ok}`}>
                       {t(`${ns}.default`)}
                     </span>
                   )}

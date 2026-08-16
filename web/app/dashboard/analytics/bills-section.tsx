@@ -7,16 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, BillOverview, UserBillTotal, ModelBillTotal, BillRecord } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { formatCost, formatTime, formatTokens } from "@/lib/utils";
-
-// Color tokens for icon badges. Tailwind requires static class names, so we
-// enumerate the variants used on this page.
-const BADGE: Record<string, string> = {
-  blue: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400",
-  green: "bg-green-50 text-green-600 dark:bg-green-950/50 dark:text-green-400",
-  purple: "bg-purple-50 text-purple-600 dark:bg-purple-950/50 dark:text-purple-400",
-  amber: "bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400",
-  cyan: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/50 dark:text-cyan-400",
-};
+import { BILL_SOURCE, ICON_BADGE } from "@/lib/ui-colors";
 
 function Badge({
   icon: Icon,
@@ -26,7 +17,7 @@ function Badge({
   color: string;
 }) {
   return (
-    <span className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${BADGE[color]}`}>
+    <span className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${ICON_BADGE[color]}`}>
       <Icon className="h-5 w-5" />
     </span>
   );
@@ -34,12 +25,7 @@ function Badge({
 
 // Source label lookup: each LLM call carries a source that identifies which
 // pipeline step produced it. Colors match the agent node palette.
-const SOURCE: Record<string, { key: string; cls: string }> = {
-  chat: { key: "bill.source_chat", cls: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400" },
-  classifier: { key: "bill.source_classifier", cls: "bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400" },
-  intermediate: { key: "bill.source_intermediate", cls: "bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400" },
-  followups: { key: "bill.source_followups", cls: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/50 dark:text-cyan-400" },
-};
+const SOURCE = BILL_SOURCE;
 
 /**
  * Usage & cost tab inside the analytics page (the standalone /dashboard/bills
@@ -59,7 +45,7 @@ export function BillsSection() {
 
       {/* Overview cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard icon={Sigma} color="blue" label={t("bill.total_tokens")} value={overview ? formatTokens(overview.total_tokens) : undefined} loading={!overview} />
+        <StatCard icon={Sigma} color="teal" label={t("bill.total_tokens")} value={overview ? formatTokens(overview.total_tokens) : undefined} loading={!overview} />
         <StatCard icon={FileInput} color="cyan" label={t("bill.prompt_tokens")} value={overview ? formatTokens(overview.prompt_tokens) : undefined} loading={!overview} />
         <StatCard icon={FileOutput} color="purple" label={t("bill.completion_tokens")} value={overview ? formatTokens(overview.completion_tokens) : undefined} loading={!overview} />
         <StatCard icon={Coins} color="amber" label={t("bill.amount")} value={overview ? formatCost(overview.amount) : undefined} loading={!overview} />
@@ -185,7 +171,7 @@ export function BillsSection() {
                         <td className="py-2 pr-4 whitespace-nowrap text-xs text-muted-foreground">{formatTime(r.created_at)}</td>
                         <td className="py-2 px-4">
                           <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${src.cls}`}>
-                            {t(src.key)}
+                            {t(src.labelKey)}
                           </span>
                         </td>
                         <td className="py-2 px-4 truncate max-w-[200px]">{r.model_name}</td>

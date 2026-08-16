@@ -11,6 +11,7 @@ import { useTranslations } from "next-intl";
 import { decodeToken, getToken } from "@/lib/auth";
 import { Logo } from "@/components/brand/logo";
 import { UserMenu } from "@/components/features/user-menu";
+import { ICON_COLOR } from "@/lib/ui-colors";
 
 type NavItem = {
   href: string;
@@ -29,18 +30,7 @@ type NavGroup = {
   items: NavItem[];
 };
 
-// Icon colors keyed by token. Tailwind needs static class names.
-const ICON_COLOR: Record<string, string> = {
-  blue: "text-teal-500 dark:text-teal-400",
-  green: "text-green-500 dark:text-green-400",
-  purple: "text-purple-500 dark:text-purple-400",
-  orange: "text-orange-500 dark:text-orange-400",
-  cyan: "text-cyan-500 dark:text-cyan-400",
-  indigo: "text-indigo-500 dark:text-indigo-400",
-  amber: "text-amber-500 dark:text-amber-400",
-  rose: "text-rose-500 dark:text-rose-400",
-};
-
+// Icon colors live in lib/ui-colors, keyed by token name.
 export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const [isAdmin, setIsAdmin] = useState(false);
@@ -66,7 +56,7 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const groups: NavGroup[] = [
     {
       items: [
-        { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, color: "blue", exact: true },
+        { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, color: "teal", exact: true },
       ],
     },
     ...(canManage
@@ -174,7 +164,7 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
                         : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                   )}
                 >
-                  <Icon className={cn("h-4 w-4 shrink-0", active ? "text-primary" : ICON_COLOR[item.color ?? "blue"])} />
+                  <Icon className={cn("h-4 w-4 shrink-0", active ? "text-primary" : ICON_COLOR[item.color ?? "teal"])} />
                   {t(item.labelKey)}
                 </Link>
               );

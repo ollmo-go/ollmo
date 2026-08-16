@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { api, AnalyticsOverview, AnalyticsDocStats, KBUsage, ActivityItem, FeedbackItem } from "@/lib/api";
 import { useTranslations } from "next-intl";
+import { ICON_BADGE, STATUS_SOFT } from "@/lib/ui-colors";
 import { formatSize, formatTime, cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { BillsSection } from "./bills-section";
@@ -31,17 +32,8 @@ function initialTab(): Tab {
   return new URLSearchParams(window.location.search).get("tab") === "bills" ? "bills" : "overview";
 }
 
-// Color tokens for icon badges. Tailwind requires static class names, so we
-// enumerate the variants used across the dashboard.
-const BADGE: Record<string, string> = {
-  blue: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400",
-  green: "bg-green-50 text-green-600 dark:bg-green-950/50 dark:text-green-400",
-  purple: "bg-purple-50 text-purple-600 dark:bg-purple-950/50 dark:text-purple-400",
-  orange: "bg-orange-50 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400",
-  rose: "bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400",
-  cyan: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/50 dark:text-cyan-400",
-  amber: "bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400",
-};
+// Icon badge variants live in lib/ui-colors (shared across dashboard pages).
+const BADGE = ICON_BADGE;
 
 function Badge({
   icon: Icon,
@@ -62,16 +54,16 @@ function Badge({
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  completed: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400",
-  ready: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400",
-  success: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400",
-  active: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400",
-  processing: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400",
-  parsing: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400",
+  completed: STATUS_SOFT.ok,
+  ready: STATUS_SOFT.ok,
+  success: STATUS_SOFT.ok,
+  active: STATUS_SOFT.ok,
+  processing: STATUS_SOFT.warn,
+  parsing: STATUS_SOFT.warn,
   pending: "bg-gray-100 text-gray-600 dark:bg-gray-800/60 dark:text-gray-400",
   queued: "bg-gray-100 text-gray-600 dark:bg-gray-800/60 dark:text-gray-400",
-  failed: "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400",
-  error: "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400",
+  failed: STATUS_SOFT.danger,
+  error: STATUS_SOFT.danger,
 };
 
 function StatusPill({ status }: { status: string }) {
@@ -148,7 +140,7 @@ export default function AnalyticsPage() {
 
       {/* Overview cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard icon={BookOpen} color="blue" label={t("analytics.knowledge_bases")} value={overview?.knowledge_bases} loading={!overview} />
+        <StatCard icon={BookOpen} color="teal" label={t("analytics.knowledge_bases")} value={overview?.knowledge_bases} loading={!overview} />
         <StatCard icon={FileText} color="green" label={t("analytics.documents")} value={overview?.documents} loading={!overview} />
         <StatCard icon={Layers} color="purple" label={t("analytics.chunks")} value={overview?.chunks} loading={!overview} />
         <StatCard icon={MessageSquare} color="orange" label={t("analytics.conversations")} value={overview?.conversations} loading={!overview} />

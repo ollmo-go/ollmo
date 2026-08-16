@@ -13,6 +13,7 @@ import { api, EmbeddingModel, KnowledgeBase, Paginated } from "@/lib/api";
 import { KBEditDrawer } from "@/components/kb/kb-edit-drawer";
 import { useTranslations } from "next-intl";
 import { useConfirm } from "@/components/ui/confirm";
+import { STATUS_BADGE } from "@/lib/ui-colors";
 
 export default function KnowledgeBasesPage() {
   const { data, mutate } = useSWR<Paginated<KnowledgeBase>>(
@@ -174,7 +175,7 @@ export default function KnowledgeBasesPage() {
                   <span
                     className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
                       kb.visibility === "team"
-                        ? "bg-teal-100 text-teal-700"
+                        ? STATUS_BADGE.info
                         : "bg-muted text-muted-foreground"
                     }`}
                   >

@@ -15,6 +15,7 @@ import { useAuthStore } from "@/lib/auth";
 import { useTranslations } from "next-intl";
 import { useConfirm } from "@/components/ui/confirm";
 import { formatTime } from "@/lib/utils";
+import { STATUS_BADGE } from "@/lib/ui-colors";
 
 // Shared SWR fetcher for the team page. Dispatches by key so both the users
 // list and the pending invitations list can reuse the same function.
@@ -316,7 +317,7 @@ export default function TeamPage() {
                         <span
                           className={`px-2 py-0.5 rounded text-xs ${
                             u.role === "admin"
-                              ? "bg-teal-100 text-teal-700"
+                              ? STATUS_BADGE.info
                               : "bg-muted text-muted-foreground"
                           }`}
                         >
@@ -327,8 +328,8 @@ export default function TeamPage() {
                         <span
                           className={`px-2 py-0.5 rounded text-xs ${
                             u.status === "active"
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-red-100 text-red-700"
+                              ? STATUS_BADGE.ok
+                              : STATUS_BADGE.danger
                           }`}
                         >
                           {t(`team.${u.status}`)}
@@ -411,7 +412,7 @@ export default function TeamPage() {
                       <span
                         className={`px-2 py-0.5 rounded text-xs ${
                           inv.role === "admin"
-                            ? "bg-blue-100 text-blue-700"
+                            ? STATUS_BADGE.info
                             : "bg-muted text-muted-foreground"
                         }`}
                       >
