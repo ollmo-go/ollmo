@@ -51,3 +51,20 @@ func (h *Handler) Records(c *fiber.Ctx) error {
 	}
 	return response.OK(c, fiber.Map{"items": items})
 }
+
+// Mine returns the calling user's own usage totals and recent records.
+// Scoped to the authenticated user so any tenant member can check their
+// personal consumption (chat profile dialog) without seeing other users.
+func (h *Handler) Mine(c *fiber.Ctx) error {
+	tenantID := middleware.TenantID(c)
+	userID := middleware.UserID(c)
+	overview, err := h.svc.MineOverview(c.Context(), tenantID, userID)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	records, err := h.svc.MineRecords(c.Context(), tenantID, userID, 10)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	return response.OK(c, fiber.Map{"overview": overview, "records": records})
+}

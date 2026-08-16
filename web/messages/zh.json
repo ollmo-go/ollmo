@@ -9,6 +9,10 @@
     "settings_general": "通用",
     "settings_usage": "用量",
     "settings_models": "模型设置",
+    "models": "模型",
+    "group_workspace": "工作台",
+    "group_config": "设置",
+    "group_admin": "管理",
     "api_keys": "API 密钥",
     "sign_out": "退出登录",
     "sign_out_confirm": "确认退出登录？",
@@ -58,6 +62,12 @@
     "pipeline": "数据处理流水线",
     "agent": "Agent",
     "memories": "记忆",
+    "tab_documents": "文档",
+    "tab_annotations": "标注",
+    "tab_agent": "Agent",
+    "tab_pipeline": "数据",
+    "tab_memories": "记忆",
+    "tab_executions": "历史",
     "edit_title": "编辑知识库",
     "edit_hint": "修改嵌入模型将清空已有向量并重新索引所有文档。分块大小和重叠长度创建后不可更改。",
     "name_required": "请填写名称",
@@ -452,7 +462,8 @@
     "password_mismatch": "两次输入的密码不一致",
     "password_updated": "密码已更新",
     "tab_info": "基本信息",
-    "tab_password": "修改密码"
+    "tab_password": "修改密码",
+    "tab_usage": "我的用量"
   },
   "pipeline": {
     "title": "数据处理流水线",

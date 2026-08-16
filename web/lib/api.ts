@@ -577,6 +577,13 @@ export interface BillRecord {
   created_at: string;
 }
 
+// BillMine is the current user's own usage summary + recent rows, served by
+// GET /bills/mine for the chat profile dialog.
+export interface BillMine {
+  overview: BillOverview;
+  records: BillRecord[];
+}
+
 // Audit
 export interface AuditLog {
   id: string;
@@ -1375,6 +1382,10 @@ export const api = {
   },
   async billRecords(limit = 100): Promise<{ items: BillRecord[] }> {
     return request(`/bills/records?limit=${limit}`);
+  },
+  // Personal usage: the current user's totals + recent rows (chat dialog).
+  async billMine(): Promise<BillMine> {
+    return request("/bills/mine");
   },
 
   // Audit logs (admin)

@@ -613,12 +613,15 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	analyticsGrp.Get("/activity", analyticsHandler.RecentActivity)
 	analyticsGrp.Get("/feedback", analyticsHandler.Feedback)
 
-	// Usage & cost (bill rows written per LLM call). All tenant members can
-	// view their tenant's token consumption.
+	// Usage & cost (bill rows written per LLM call). /mine is the personal
+	// view used by the chat profile dialog (any authenticated user); the
+	// tenant-wide aggregates are admin-only so members never see other
+	// users' consumption.
 	billHandler := bill.NewHandler(billSvc)
 	billGrp := protected.Group("/bills")
+	billGrp.Get("/mine", billHandler.Mine)
 	billGrp.Get("/overview", billHandler.Overview)
-	billGrp.Get("/users", billHandler.Users)
+	billGrp.Get("/users", middleware.AdminOnly(), billHandler.Users)
 	billGrp.Get("/models", billHandler.Models)
 	billGrp.Get("/records", billHandler.Records)
 

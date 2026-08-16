@@ -90,3 +90,31 @@ func (r *Repo) Overview(tenantID string) (*Overview, error) {
 		WHERE tenant_id = ?`, tenantID).Scan(&o).Error
 	return &o, err
 }
+
+// OverviewByUser returns one user's own totals, scoped to that user so
+// members can see their personal consumption without other users' rows.
+func (r *Repo) OverviewByUser(tenantID, userID string) (*Overview, error) {
+	var o Overview
+	err := r.db.Raw(`
+		SELECT COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+			COALESCE(SUM(completion_tokens),0) AS completion_tokens,
+			COALESCE(SUM(total_tokens),0) AS total_tokens,
+			COALESCE(SUM(amount),0) AS amount,
+			COUNT(*) AS call_count
+		FROM bills
+		WHERE tenant_id = ? AND user_id = ?`, tenantID, userID).Scan(&o).Error
+	return &o, err
+}
+
+// ListByUser returns the user's most recent bill rows (newest first).
+func (r *Repo) ListByUser(tenantID, userID string, limit int) ([]*Record, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	var items []*Record
+	err := r.db.Where("tenant_id = ? AND user_id = ?", tenantID, userID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&items).Error
+	return items, err
+}

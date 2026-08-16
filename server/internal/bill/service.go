@@ -102,3 +102,13 @@ func (s *Service) ModelTotals(ctx context.Context, tenantID string) ([]ModelTota
 func (s *Service) Overview(ctx context.Context, tenantID string) (*Overview, error) {
 	return s.repo.Overview(tenantID)
 }
+
+// MineOverview returns the calling user's own usage totals.
+func (s *Service) MineOverview(ctx context.Context, tenantID, userID string) (*Overview, error) {
+	return s.repo.OverviewByUser(tenantID, userID)
+}
+
+// MineRecords returns the calling user's recent bill rows.
+func (s *Service) MineRecords(ctx context.Context, tenantID, userID string, limit int) ([]*Record, error) {
+	return s.repo.ListByUser(tenantID, userID, limit)
+}

@@ -1,12 +1,12 @@
 "use client";
 
 import { X } from "lucide-react";
-import { ProfileEditor } from "@/components/features/profile-form";
+import { ProfilePanel } from "@/components/features/profile-form";
 import { useTranslations } from "next-intl";
 
-// ProfileDialog is the foreground modal for editing the current user's
-// name and password. Triggered from the chat sidebar — keeps regular
-// users out of the backend dashboard.
+// ProfileDialog is the foreground modal triggered from the chat sidebar —
+// keeps regular users out of the backend dashboard. It hosts the personal
+// center (profile / password / usage) with a vertical section nav.
 export function ProfileDialog({
   open,
   onOpenChange,
@@ -24,8 +24,10 @@ export function ProfileDialog({
         onClick={() => onOpenChange(false)}
         aria-hidden="true"
       />
-      <div className="relative w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
+      {/* Fixed height (capped by viewport) keeps the window stable when
+          switching sections; the content column scrolls internally. */}
+      <div className="relative w-full max-w-2xl h-[min(520px,90vh)] rounded-lg border bg-background shadow-lg flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0 border-b">
           <h3 className="text-lg font-semibold">{t("profile.title")}</h3>
           <button
             onClick={() => onOpenChange(false)}
@@ -35,7 +37,7 @@ export function ProfileDialog({
             <X className="h-5 w-5" />
           </button>
         </div>
-        <ProfileEditor onSaved={() => onOpenChange(false)} />
+        <ProfilePanel onSaved={() => onOpenChange(false)} />
       </div>
     </div>
   );
