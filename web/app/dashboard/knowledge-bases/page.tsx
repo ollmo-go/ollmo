@@ -174,7 +174,7 @@ export default function KnowledgeBasesPage() {
                   <span
                     className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
                       kb.visibility === "team"
-                        ? "bg-blue-100 text-blue-700"
+                        ? "bg-teal-100 text-teal-700"
                         : "bg-muted text-muted-foreground"
                     }`}
                   >

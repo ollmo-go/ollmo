@@ -33,7 +33,7 @@ import {
 import { useTranslations } from "next-intl";
 
 const BADGE: Record<string, string> = {
-  blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400",
+  blue: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400",
   purple: "bg-purple-50 text-purple-600 dark:bg-purple-950/50 dark:text-purple-400",
   orange: "bg-orange-50 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400",
   indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400",

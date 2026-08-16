@@ -316,7 +316,7 @@ export default function TeamPage() {
                         <span
                           className={`px-2 py-0.5 rounded text-xs ${
                             u.role === "admin"
-                              ? "bg-blue-100 text-blue-700"
+                              ? "bg-teal-100 text-teal-700"
                               : "bg-muted text-muted-foreground"
                           }`}
                         >

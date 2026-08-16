@@ -31,7 +31,7 @@ type NavGroup = {
 
 // Icon colors keyed by token. Tailwind needs static class names.
 const ICON_COLOR: Record<string, string> = {
-  blue: "text-blue-500 dark:text-blue-400",
+  blue: "text-teal-500 dark:text-teal-400",
   green: "text-green-500 dark:text-green-400",
   purple: "text-purple-500 dark:text-purple-400",
   orange: "text-orange-500 dark:text-orange-400",

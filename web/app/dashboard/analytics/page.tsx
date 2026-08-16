@@ -34,7 +34,7 @@ function initialTab(): Tab {
 // Color tokens for icon badges. Tailwind requires static class names, so we
 // enumerate the variants used across the dashboard.
 const BADGE: Record<string, string> = {
-  blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400",
+  blue: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400",
   green: "bg-green-50 text-green-600 dark:bg-green-950/50 dark:text-green-400",
   purple: "bg-purple-50 text-purple-600 dark:bg-purple-950/50 dark:text-purple-400",
   orange: "bg-orange-50 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400",

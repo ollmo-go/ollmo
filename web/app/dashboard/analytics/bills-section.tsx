@@ -11,7 +11,7 @@ import { formatCost, formatTime, formatTokens } from "@/lib/utils";
 // Color tokens for icon badges. Tailwind requires static class names, so we
 // enumerate the variants used on this page.
 const BADGE: Record<string, string> = {
-  blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400",
+  blue: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400",
   green: "bg-green-50 text-green-600 dark:bg-green-950/50 dark:text-green-400",
   purple: "bg-purple-50 text-purple-600 dark:bg-purple-950/50 dark:text-purple-400",
   amber: "bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400",
@@ -35,7 +35,7 @@ function Badge({
 // Source label lookup: each LLM call carries a source that identifies which
 // pipeline step produced it. Colors match the agent node palette.
 const SOURCE: Record<string, { key: string; cls: string }> = {
-  chat: { key: "bill.source_chat", cls: "bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400" },
+  chat: { key: "bill.source_chat", cls: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400" },
   classifier: { key: "bill.source_classifier", cls: "bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400" },
   intermediate: { key: "bill.source_intermediate", cls: "bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400" },
   followups: { key: "bill.source_followups", cls: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/50 dark:text-cyan-400" },

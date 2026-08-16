@@ -27,7 +27,7 @@ const accents: Record<string, NodeAccent> = {
   classifier: { color: "#8b5cf6", icon: "text-violet-500" },
   retrieval: { color: "#10b981", icon: "text-emerald-500" },
   condition: { color: "#f59e0b", icon: "text-amber-500" },
-  llm: { color: "#3b82f6", icon: "text-blue-500" },
+  llm: { color: "#0d9488", icon: "text-teal-500" },
   message: { color: "#06b6d4", icon: "text-cyan-500" },
 };
 
@@ -244,7 +244,7 @@ export const NODE_TYPE_LABEL_KEY: Record<string, string> = {
 // between source and target without deleting and re-wiring by hand.
 const INSERTABLE_NODES: { type: string; labelKey: string; icon: React.ReactNode; color: string }[] = [
   { type: "retrieval", labelKey: "agent.node_retrieval", icon: <Search className="h-3.5 w-3.5" />, color: "text-emerald-500" },
-  { type: "llm", labelKey: "agent.node_llm", icon: <Brain className="h-3.5 w-3.5" />, color: "text-blue-500" },
+  { type: "llm", labelKey: "agent.node_llm", icon: <Brain className="h-3.5 w-3.5" />, color: "text-teal-500" },
   { type: "message", labelKey: "agent.node_message", icon: <MessageSquare className="h-3.5 w-3.5" />, color: "text-cyan-500" },
   { type: "condition", labelKey: "agent.node_condition", icon: <GitBranch className="h-3.5 w-3.5" />, color: "text-amber-500" },
   { type: "classifier", labelKey: "agent.node_classifier", icon: <Split className="h-3.5 w-3.5" />, color: "text-violet-500" },

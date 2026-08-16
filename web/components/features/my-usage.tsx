@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 // Source badge colors match the dashboard bills page.
 const SOURCE: Record<string, { key: string; cls: string }> = {
-  chat: { key: "bill.source_chat", cls: "bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400" },
+  chat: { key: "bill.source_chat", cls: "bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400" },
   classifier: { key: "bill.source_classifier", cls: "bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400" },
   intermediate: { key: "bill.source_intermediate", cls: "bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400" },
   followups: { key: "bill.source_followups", cls: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/50 dark:text-cyan-400" },

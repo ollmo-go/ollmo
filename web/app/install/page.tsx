@@ -177,7 +177,7 @@ export default function InstallPage() {
                       href={t("install.api_key_link_url")}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs text-blue-600 hover:underline"
+                      className="text-xs text-primary hover:underline"
                     >
                       {t("install.api_key_link")}
                     </a>
