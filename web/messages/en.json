@@ -784,7 +784,7 @@
   },
   "analytics": {
     "title": "Analytics",
-    "subtitle": "Platform-wide overview: resource usage, document processing, and answer feedback",
+    "subtitle": "Team-wide overview: resource usage, document processing, and answer feedback",
     "overview": "Overview",
     "knowledge_bases": "Knowledge Bases",
     "documents": "Documents",
@@ -870,6 +870,12 @@
     "pinned": "Pinned",
     "unpinned": "Unpinned",
     "exported": "Exported",
-    "title_prompt": "Enter new conversation title"
+    "title_prompt": "Enter new conversation title",
+    "group_pinned": "Pinned",
+    "group_today": "Today",
+    "group_yesterday": "Yesterday",
+    "group_week": "Previous 7 days",
+    "group_month": "Previous 30 days",
+    "group_older": "Older"
   }
 }

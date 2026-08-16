@@ -144,6 +144,38 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
   );
   const filteredConvs = convs?.items?.filter((c) => c.kb_id === selectedKb);
 
+  // DeepSeek-style grouping: pinned conversations form their own group on
+  // top; the rest are bucketed by last-activity date (today / yesterday /
+  // previous 7 days / previous 30 days / older). Search results stay flat.
+  const convGroups = useMemo(() => {
+    const items = filteredConvs ?? [];
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const dayDiff = (d: Date) =>
+      Math.floor((todayStart - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) / 86400000);
+    const out: { key: string; items: Conversation[] }[] = [];
+    const pinned = items.filter((c) => c.pinned);
+    const rest = items.filter((c) => !c.pinned);
+    if (pinned.length) out.push({ key: "pinned", items: pinned });
+    const buckets: Record<string, Conversation[]> = { today: [], yesterday: [], week: [], month: [], older: [] };
+    for (const c of rest) {
+      const dd = dayDiff(new Date(c.updated_at));
+      const k = dd <= 0 ? "today" : dd === 1 ? "yesterday" : dd < 8 ? "week" : dd < 31 ? "month" : "older";
+      buckets[k].push(c);
+    }
+    for (const [key, arr] of Object.entries(buckets)) if (arr.length) out.push({ key, items: arr });
+    return out;
+  }, [filteredConvs]);
+
+  const GROUP_LABELS: Record<string, string> = {
+    pinned: t("conv.group_pinned"),
+    today: t("conv.group_today"),
+    yesterday: t("conv.group_yesterday"),
+    week: t("conv.group_week"),
+    month: t("conv.group_month"),
+    older: t("conv.group_older"),
+  };
+
   useEffect(() => {
     if (!selectedKb && kbs?.items?.length) {
       setSelectedKb(kbs.items[0].id);
@@ -686,6 +718,53 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     );
   }
 
+  function renderRow(c: Conversation) {
+    return (
+      <div
+        key={c.id}
+        className={`group flex items-center justify-between rounded-md px-2 py-1.5 text-sm cursor-pointer ${
+          selectedConv === c.id ? "bg-accent" : "hover:bg-accent/50"
+        }`}
+        onClick={() => { selectConv(c.id); setShowList(false); }}
+      >
+        <div className="flex items-center gap-1 min-w-0">
+          {c.pinned && <Pin className="h-3 w-3 shrink-0 text-primary" />}
+          <span className="truncate">{c.title}</span>
+        </div>
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
+          <button
+            className="text-muted-foreground hover:text-primary p-0.5"
+            onClick={(e) => { e.stopPropagation(); togglePin(c.id, c.pinned); }}
+            title={c.pinned ? t("conv.unpin") : t("conv.pin")}
+          >
+            <Pin className="h-3.5 w-3.5" />
+          </button>
+          <button
+            className="text-muted-foreground hover:text-foreground p-0.5"
+            onClick={(e) => { e.stopPropagation(); rename(c.id, c.title); }}
+            title={t("conv.rename")}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            className="text-muted-foreground hover:text-foreground p-0.5"
+            onClick={(e) => { e.stopPropagation(); exportConv(c.id); }}
+            title={t("conv.export")}
+          >
+            <Download className="h-3.5 w-3.5" />
+          </button>
+          <button
+            className="text-muted-foreground hover:text-destructive p-0.5"
+            onClick={(e) => { e.stopPropagation(); del(c.id); }}
+            aria-label={t("common.delete")}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex gap-4 h-full relative">
       {showList && (
@@ -731,50 +810,16 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
             {!convs && Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-8 w-full" />
             ))}
-            {filteredConvs?.map((c) => (
-              <div
-                key={c.id}
-                className={`group flex items-center justify-between rounded-md px-2 py-1.5 text-sm cursor-pointer ${
-                  selectedConv === c.id ? "bg-accent" : "hover:bg-accent/50"
-                }`}
-                onClick={() => { selectConv(c.id); setShowList(false); }}
-              >
-                <div className="flex items-center gap-1 min-w-0">
-                  {c.pinned && <Pin className="h-3 w-3 shrink-0 text-primary" />}
-                  <span className="truncate">{c.title}</span>
-                </div>
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
-                  <button
-                    className="text-muted-foreground hover:text-primary p-0.5"
-                    onClick={(e) => { e.stopPropagation(); togglePin(c.id, c.pinned); }}
-                    title={c.pinned ? t("conv.unpin") : t("conv.pin")}
-                  >
-                    <Pin className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    className="text-muted-foreground hover:text-foreground p-0.5"
-                    onClick={(e) => { e.stopPropagation(); rename(c.id, c.title); }}
-                    title={t("conv.rename")}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    className="text-muted-foreground hover:text-foreground p-0.5"
-                    onClick={(e) => { e.stopPropagation(); exportConv(c.id); }}
-                    title={t("conv.export")}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    className="text-muted-foreground hover:text-destructive p-0.5"
-                    onClick={(e) => { e.stopPropagation(); del(c.id); }}
-                    aria-label={t("common.delete")}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
+            {convQuery.trim() !== ""
+              ? filteredConvs?.map((c) => renderRow(c))
+              : convGroups.map((g) => (
+                  <div key={g.key}>
+                    <p className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground/80">
+                      {GROUP_LABELS[g.key]}
+                    </p>
+                    {g.items.map((c) => renderRow(c))}
+                  </div>
+                ))}
             {convs && filteredConvs?.length === 0 && (
               <p className="text-xs text-muted-foreground px-2 py-2">
                 {t("chat.no_conversations")}

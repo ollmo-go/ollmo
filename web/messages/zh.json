@@ -783,7 +783,7 @@
   },
   "analytics": {
     "title": "数据分析",
-    "subtitle": "平台整体运行概况：资源用量、文档处理与回答反馈",
+    "subtitle": "团队整体运行概况：资源用量、文档处理与回答反馈",
     "overview": "总览",
     "knowledge_bases": "知识库",
     "documents": "文档",
@@ -869,6 +869,12 @@
     "pinned": "已置顶",
     "unpinned": "已取消置顶",
     "exported": "已导出",
-    "title_prompt": "输入新的对话标题"
+    "title_prompt": "输入新的对话标题",
+    "group_pinned": "置顶",
+    "group_today": "今天",
+    "group_yesterday": "昨天",
+    "group_week": "7 天内",
+    "group_month": "30 天内",
+    "group_older": "更早"
   }
 }
