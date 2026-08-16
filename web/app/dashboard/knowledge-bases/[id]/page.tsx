@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import useSWR from "swr";
-import { Check, ChevronDown, Download, FileText, Globe, MoreVertical, Pencil, RefreshCw, Search, Tags, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronDown, Download, FileText, Globe, Pencil, RefreshCw, Search, Tags, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api, Chunk, DocEvent, Document, EmbeddingModel, KnowledgeBase, Paginated, PreviewResult } from "@/lib/api";
 import { RetrievalTestDrawer } from "@/components/kb/retrieval-test-drawer";
-import { KBEditDrawer } from "@/components/kb/kb-edit-drawer";
 import { useTranslations } from "next-intl";
 import { useConfirm } from "@/components/ui/confirm";
 import { cn, formatSize } from "@/lib/utils";
@@ -37,11 +36,10 @@ const STATUS_COLOR: Record<string, string> = {
 export default function KBDetailPage() {
   const params = useParams<{ id: string }>();
   const kbId = params.id;
-  const router = useRouter();
   const t = useTranslations();
   const confirm = useConfirm();
 
-  const { data: kb, mutate: mutateKB } = useSWR<KnowledgeBase>(`kb-${kbId}`, () => api.getKB(kbId));
+  const { data: kb } = useSWR<KnowledgeBase>(`kb-${kbId}`, () => api.getKB(kbId));
   // Shared key with the KB list page and edit drawer (same fetcher) so the
   // embedding list is fetched once and reused across navigation.
   const { data: embedData } = useSWR<Paginated<EmbeddingModel>>("embedding-list", () => api.listEmbeddings(1, 50));
@@ -76,9 +74,6 @@ export default function KBDetailPage() {
   const [savingChunk, setSavingChunk] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  // "..." overflow menu (edit/delete KB) and its edit drawer.
-  const [kbMenuOpen, setKbMenuOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
   // Document multi-select + batch operations.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
@@ -509,40 +504,6 @@ export default function KBDetailPage() {
     }
   }
 
-  // Toggle KB visibility between "private" (owner only) and "team"
-  // (all tenant members). Updates the cached KB object optimistically.
-  async function setVisibility(visibility: "private" | "team") {
-    if (!kb || kb.visibility === visibility) return;
-    const prev = kb;
-    mutateKB({ ...kb, visibility }, false);
-    try {
-      await api.setKBVisibility(kbId, visibility);
-      toast.success(t("toast.updated"));
-    } catch (e) {
-      toast.error((e as Error).message);
-      mutateKB(prev, false);
-    }
-  }
-
-  // Delete the whole KB, then return to the list page.
-  async function removeKB() {
-    if (!kb) return;
-    const ok = await confirm({
-      title: t("kb.delete_confirm"),
-      description: kb.name,
-      confirmText: t("common.delete"),
-      destructive: true,
-    });
-    if (!ok) return;
-    try {
-      await api.deleteKB(kbId);
-      toast.success(t("toast.deleted"));
-      router.push("/dashboard/knowledge-bases");
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
-  }
-
   // Doc statuses known to have translations. Unknown values (e.g. from a
   // future backend) render raw instead of triggering MISSING_MESSAGE noise.
   const knownStatuses = new Set([
@@ -643,66 +604,6 @@ export default function KBDetailPage() {
                 placeholder={t("common.search")}
                 className="max-w-xs h-8"
               />
-              {kb && (
-                <div className="inline-flex rounded-md border overflow-hidden">
-                  <button
-                    onClick={() => setVisibility("private")}
-                    className={cn(
-                      "px-2.5 py-1.5 text-xs transition-colors",
-                      kb.visibility === "private"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-background hover:bg-accent"
-                    )}
-                    title={t("kb.visibility_private_desc")}
-                  >
-                    {t("kb.private")}
-                  </button>
-                  <button
-                    onClick={() => setVisibility("team")}
-                    className={cn(
-                      "px-2.5 py-1.5 text-xs transition-colors border-l",
-                      kb.visibility === "team"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-background hover:bg-accent"
-                    )}
-                    title={t("kb.visibility_team_desc")}
-                  >
-                    {t("kb.team_shared")}
-                  </button>
-                </div>
-              )}
-              {kb && (
-                <div className="relative">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8"
-                    aria-label={t("common.more")}
-                    onClick={() => setKbMenuOpen((v) => !v)}
-                  >
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                  {kbMenuOpen && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setKbMenuOpen(false)} />
-                      <div className="absolute right-0 top-full mt-1 z-50 w-28 rounded-md border border-border bg-popover shadow-md py-1">
-                        <button
-                          onClick={() => { setKbMenuOpen(false); setEditOpen(true); }}
-                          className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-                        >
-                          <Pencil className="h-3.5 w-3.5" /> {t("common.edit")}
-                        </button>
-                        <button
-                          onClick={() => { setKbMenuOpen(false); removeKB(); }}
-                          className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-accent transition-colors"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" /> {t("common.delete")}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
             </div>
           </div>
         </CardHeader>
@@ -1146,17 +1047,6 @@ export default function KBDetailPage() {
 
       {retrievalOpen && (
         <RetrievalTestDrawer kbId={kbId} onClose={() => setRetrievalOpen(false)} />
-      )}
-
-      {editOpen && kb && (
-        <KBEditDrawer
-          kb={kb}
-          onClose={() => setEditOpen(false)}
-          onSaved={() => {
-            setEditOpen(false);
-            mutateKB();
-          }}
-        />
       )}
     </div>
   );
