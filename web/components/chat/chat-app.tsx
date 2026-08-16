@@ -972,6 +972,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                     created_at: new Date().toISOString(),
                   }}
                   kbId={selectedKb}
+                  actions={false}
                 />
               </div>
             ) : (

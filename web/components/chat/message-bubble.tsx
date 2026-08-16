@@ -42,6 +42,7 @@ export const MessageBubble = memo(function MessageBubble({
   onEditSend,
   onVote,
   onCitation,
+  actions = true,
 }: {
   message: Message;
   streaming?: boolean;
@@ -55,6 +56,9 @@ export const MessageBubble = memo(function MessageBubble({
   // the document viewer; otherwise the bubble falls back to its own modal
   // (agent test drawer / standalone contexts).
   onCitation?: (citation: Citation) => void;
+  // Hover action row (copy / vote / stats). Disabled for the greeting, which
+  // is a welcome message rather than generated content.
+  actions?: boolean;
 }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
@@ -202,7 +206,7 @@ export const MessageBubble = memo(function MessageBubble({
             })}
           </div>
         )}
-        {!isUser && !streaming && message.content && (
+        {!isUser && !streaming && message.content && actions && (
           <div className="mt-1 flex items-center gap-3 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground">
             <button
               onClick={copy}
