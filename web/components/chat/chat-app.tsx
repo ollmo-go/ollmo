@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfirm, usePrompt } from "@/components/ui/confirm";
+import { Logo } from "@/components/brand/logo";
 import {
   api,
   Citation,
@@ -960,29 +961,28 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center max-w-3xl mx-auto w-full">
-            {greeting ? (
-              <div className="w-full mb-4">
-                <MessageBubble
-                  message={{
-                    id: "greeting",
-                    tenant_id: "",
-                    conversation_id: "",
-                    role: "assistant",
-                    content: greeting,
-                    created_at: new Date().toISOString(),
-                  }}
-                  kbId={selectedKb}
-                  actions={false}
-                />
-              </div>
-            ) : (
-              <div className="text-center space-y-2 mb-8">
-                <h2 className="text-2xl font-medium">{t("chat.welcome_title")}</h2>
-                <p className="text-sm text-muted-foreground">{t("chat.welcome_desc")}</p>
-              </div>
-            )}
+            {/* Empty state, DeepSeek-style: centered logo + one sentence. The
+                headline is the knowledge base's opening message (Agent
+                canvas); fall back to the site description, then the default
+                welcome copy. */}
+            <div className="mb-8 flex flex-col items-center gap-3 text-center">
+              <Logo showName={false} size="h-12 w-12" />
+              {kbs?.items?.find((k) => k.id === selectedKb)?.name && (
+                <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                  {kbs.items.find((k) => k.id === selectedKb)!.name}
+                </p>
+              )}
+              <h2 className="max-w-xl text-2xl font-semibold tracking-tight md:text-3xl">
+                {greeting || t("chat.welcome_title")}
+              </h2>
+              {!greeting && (
+                <p className="max-w-lg text-sm text-muted-foreground">
+                  {settings?.site_description || t("chat.welcome_desc")}
+                </p>
+              )}
+            </div>
             {suggestedQuestions.length > 0 && (
-              <div className="w-full flex flex-wrap gap-2 mb-4">
+              <div className="mb-6 flex w-full flex-wrap justify-center gap-2">
                 {suggestedQuestions.map((q) => (
                   <button
                     key={q}
