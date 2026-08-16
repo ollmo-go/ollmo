@@ -113,6 +113,15 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
   // Document viewer side panel: opened by clicking a citation chip. The
   // full-width chat stays visible next to it on desktop (side-by-side review).
   const [viewerCitation, setViewerCitation] = useState<Citation | null>(null);
+  // Escape closes the panel; clicking the backdrop does too.
+  useEffect(() => {
+    if (!viewerCitation) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setViewerCitation(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewerCitation]);
   const confirm = useConfirm();
   const prompt = usePrompt();
 
@@ -932,14 +941,21 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         )}
       </div>
       {viewerCitation && selectedKb && (
-        <div className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-border bg-background shadow-2xl sm:w-[48%] lg:w-[44%]">
-          <DocumentViewer
-            kbId={selectedKb}
-            citation={viewerCitation}
-            onClose={() => setViewerCitation(null)}
-            embed
+        <>
+          {/* Backdrop over the chat area: clicking outside the panel closes it. */}
+          <div
+            className="fixed inset-0 z-30 bg-black/20"
+            onClick={() => setViewerCitation(null)}
           />
-        </div>
+          <div className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-border bg-background shadow-2xl sm:w-[48%] lg:w-[44%]">
+            <DocumentViewer
+              kbId={selectedKb}
+              citation={viewerCitation}
+              onClose={() => setViewerCitation(null)}
+              embed
+            />
+          </div>
+        </>
       )}
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
     </div>
