@@ -43,14 +43,17 @@ ollmo converges everything into three steps: **upload documents, ask questions, 
 - **Multi-Tenancy** — Logical isolation across MySQL, Milvus, and MinIO; every table carries `tenant_id`.
 - **Document Pipeline** — Upload (drag & drop, paste, multi-file) → parse (MinerU / local parser) → chunk → embed → index, fully async via Asynq + Redis.
 - **Streaming Chat** — Real-time SSE streaming with source citations. Doubao-style greeting from agent opening message.
+- **Annotation Q&A** — Curated question/answer pairs per KB matched by embedding similarity; a close match answers verbatim, keeping high-frequency answers consistent.
 - **Auto-Memory** — Long conversations are automatically summarized in the background (async LLM task); summaries are injected into later sessions for cross-conversation continuity. Toggleable site-wide.
+- **Personal Center** — Click your name in the chat sidebar to open the personal center: profile info, password change, and "My Usage" (personal message quota, token consumption, estimated cost, and recent call records) — members can track their own usage without entering the console.
 - **Agent Canvas** — Visual agent pipeline (React Flow): intent classification → retrieval → condition branch → LLM → direct reply. Node outputs are referenceable variables (`{node.output}`) in prompts and conditions, enabling LLM chaining and generic branching; per-node debug shows output variables, and nodes highlight live during execution. In-canvas undo/redo and sticky notes. Per-KB system prompt, temperature, top_k, rerank toggle, opening message, and LLM selection.
 - **Ingestion Pipeline Canvas** — Visual ingestion DAG (React Flow): source → parser → chunker → embedder → sink, with configurable parsing options, chunking strategy, and batch size.
 - **GraphRAG** — LLM-powered entity & relation extraction at ingestion; entity matching enriches retrieval context at query time.
 - **Configurable Models** — Tenant-level LLM / Embedding / Rerank provider management via web UI, with per-KB overrides. Two-column popup selector (provider list on left, models on right) for intuitive model switching. Selection priority: KB config → tenant default → config.yaml.
-- **Team & Access Control** — Invitation-based membership with owner / admin / member roles, per-user daily message quotas, KB-level membership (viewer / editor / owner).
+- **Usage & Cost** — Team-level token/cost accounting: overview, per-user and per-model totals, and raw call records. Every LLM invocation (main reply, agent classifier/intermediate nodes, follow-up suggestions) is charged automatically; visible to admins only.
+- **Team & Access Control** — Invitation-based membership with admin / member roles and per-user daily message quotas. Clean role separation: admins manage knowledge bases, models, and team data in the console, while members focus on chatting; KBs are either private or team-shared.
 - **Admin Console** — Super-admin user management, tenant management with plan & quota control (free / pro / enterprise), system settings (registration toggle, auto-memory), analytics dashboard, and audit logging.
-- **External API** — API-key authenticated programmatic access (search, KB management, streaming chat).
+- **External API** — API-key authenticated programmatic access (search, KB management, streaming chat); keys are created and managed by admins.
 - **Internationalization** — Chinese / English UI with server-side message contracts. No locale in URL paths.
 
 ## Tech Stack
@@ -107,6 +110,7 @@ ollmo/
 │   │   ├── apikey/         # API key management & middleware
 │   │   ├── audit/          # Audit logging
 │   │   ├── auth/           # Authentication (email + password + JWT)
+│   │   ├── bill/           # Usage & cost accounting (token/cost records)
 │   │   ├── chat/           # Streaming chat with citations
 │   │   ├── doc/            # Document lifecycle, chunking, worker
 │   │   ├── embedding/      # Embedding model management
@@ -126,7 +130,7 @@ ollmo/
 │   ├── pkg/                # Shared infrastructure (db, vector, clients)
 │   └── config.yaml
 ├── web/                    # Next.js frontend
-│   ├── app/                # App Router pages ('/' chat, '/dashboard/*' admin)
+│   ├── app/                # App Router pages ('/' chat, '/dashboard/*' admin console, admins/super admins only)
 │   ├── components/         # UI + feature components (agent, pipeline, etc.)
 │   ├── lib/                # API client, i18n, utils
 │   └── messages/           # i18n message files (zh, en)
@@ -243,7 +247,7 @@ make clean         # Remove build artifacts
 - [x] **Phase 1 — MVP**: KB/document CRUD, document parsing, embedding, hybrid retrieval, streaming chat with citation, local auth + tenant isolation.
 - [x] **Phase 2 — Configurability**: Multi LLM/Embedding/Rerank providers, KB editing with re-indexing, rerank, multi chunking strategies, drag & drop upload, i18n.
 - [x] **Phase 3 — Intelligence**: Ingestion Pipeline canvas (React Flow), GraphRAG, Agent canvas, Memory, role-based access control, external API, team management.
-- [x] **Phase 4 — Production Readiness**: Analytics dashboard, audit logging, conversation management (search / rename / export / pin), auto-memory summarization, super-admin console (users, tenants, plans & quotas, system settings), registration toggle.
+- [x] **Phase 4 — Production Readiness**: Analytics dashboard, usage & cost (billing), audit logging, conversation management (search / rename / export / pin), auto-memory summarization, personal center, annotation Q&A, super-admin console (users, tenants, plans & quotas, system settings), registration toggle.
 - [ ] **Phase 5 — Document Intelligence**:
 
   ### 5.1 Document Preview & Citation Tracing
