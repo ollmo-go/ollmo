@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import useSWR from "swr";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "next-intl";
@@ -52,9 +51,12 @@ export default function Home() {
   return (
     <div className="flex flex-col h-screen">
       <header className="flex items-center justify-between px-4 h-14 border-b shrink-0">
-        <Link href="/" className="hover:opacity-80 transition-opacity">
+        {/* Plain anchor on purpose: clicking the logo re-requests the
+            homepage, resetting any open conversation. A next/link to the
+            current route is a no-op and would keep the chat state. */}
+        <a href="/" className="hover:opacity-80 transition-opacity">
           <Logo />
-        </Link>
+        </a>
         <LanguageToggle />
       </header>
 
