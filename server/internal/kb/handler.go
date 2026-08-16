@@ -39,7 +39,10 @@ func (h *Handler) Get(c *fiber.Ctx) error {
 func (h *Handler) List(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	size, _ := strconv.Atoi(c.Query("size", "20"))
-	items, total, err := h.svc.List(c.Context(), middleware.TenantID(c), middleware.UserID(c), ListQuery{Page: page, Size: size})
+	// Admins (and super admins) list the whole tenant; members only their
+	// own and team-visible KBs.
+	allTenant := middleware.Role(c) == "admin" || middleware.IsSuperAdmin(c)
+	items, total, err := h.svc.List(c.Context(), middleware.TenantID(c), middleware.UserID(c), ListQuery{Page: page, Size: size}, allTenant)
 	if err != nil {
 		return response.Fail(c, err)
 	}

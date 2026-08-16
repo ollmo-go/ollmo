@@ -45,14 +45,16 @@ func (r *Repo) FindByID(tenantID, id string) (*KnowledgeBase, error) {
 	return &c, nil
 }
 
-// List returns KBs the user owns, is a member of, or are team-visible.
-func (r *Repo) List(tenantID, userID string, page, size int) ([]*KnowledgeBase, int64, error) {
+// List returns KBs the user can see. Admins and super admins get the whole
+// tenant (management needs full visibility, including members' private KBs);
+// regular members only see KBs they own or that are team-visible.
+func (r *Repo) List(tenantID, userID string, page, size int, allTenant bool) ([]*KnowledgeBase, int64, error) {
 	var items []*KnowledgeBase
 	var total int64
-	q := r.db.Model(&KnowledgeBase{}).Where(
-		"tenant_id = ? AND (owner_id = ? OR visibility = ?)",
-		tenantID, userID, VisibilityTeam,
-	)
+	q := r.db.Model(&KnowledgeBase{}).Where("tenant_id = ?", tenantID)
+	if !allTenant {
+		q = q.Where("owner_id = ? OR visibility = ?", userID, VisibilityTeam)
+	}
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

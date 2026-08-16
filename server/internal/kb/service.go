@@ -146,14 +146,14 @@ func (s *Service) Get(ctx context.Context, tenantID, id string) (*KnowledgeBase,
 	return s.repo.FindByID(tenantID, id)
 }
 
-func (s *Service) List(ctx context.Context, tenantID, userID string, q ListQuery) ([]*KnowledgeBase, int64, error) {
+func (s *Service) List(ctx context.Context, tenantID, userID string, q ListQuery, allTenant bool) ([]*KnowledgeBase, int64, error) {
 	if q.Page <= 0 {
 		q.Page = 1
 	}
 	if q.Size <= 0 || q.Size > 100 {
 		q.Size = 20
 	}
-	return s.repo.List(tenantID, userID, q.Page, q.Size)
+	return s.repo.List(tenantID, userID, q.Page, q.Size, allTenant)
 }
 
 func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInput) (*KnowledgeBase, error) {

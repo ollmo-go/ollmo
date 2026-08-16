@@ -60,41 +60,44 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
     }
   }, []);
 
-  // Backend management nav grouped by semantics:
-  // home → workspace (KB/Analytics/Usage) → settings (models/API keys)
-  // → admin (team/audit) → system admin (super admin only, amber).
+  // Backend management nav grouped by semantics. The dashboard itself is
+  // admin/super-admin only (the layout gate redirects members), so the
+  // workspace/config/admin groups are gated on canManage.
   // Chat is in the frontend product (/), not in the dashboard.
+  const canManage = isAdmin || isSuperAdmin;
   const groups: NavGroup[] = [
     {
       items: [
         { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, color: "blue", exact: true },
       ],
     },
-    {
-      labelKey: "nav.group_workspace",
-      items: [
-        { href: "/dashboard/knowledge-bases", labelKey: "nav.knowledge_bases", icon: BookOpen, color: "green" },
-        { href: "/dashboard/analytics", labelKey: "nav.analytics", icon: BarChart3, color: "purple" },
-      ],
-    },
-    {
-      labelKey: "nav.group_config",
-      items: [
-        { href: "/dashboard/settings/models", labelKey: "nav.models", icon: Cpu, color: "orange" },
-        { href: "/dashboard/settings/api-keys", labelKey: "nav.api_keys", icon: Key, color: "cyan" },
-      ],
-    },
-    ...(isAdmin
-      ? [{
-          labelKey: "nav.group_admin",
-          items: [
-            { href: "/dashboard/tenant", labelKey: "nav.my_tenant", icon: Users, color: "indigo" },
-            // Team-level usage & cost lives with the admin tools; members see
-            // their personal usage in the chat profile dialog instead.
-            { href: "/dashboard/bills", labelKey: "nav.usage", icon: Coins, color: "amber" },
-            { href: "/dashboard/audit", labelKey: "nav.audit", icon: ScrollText, color: "amber" },
-          ],
-        } as NavGroup]
+    ...(canManage
+      ? [
+          {
+            labelKey: "nav.group_workspace",
+            items: [
+              { href: "/dashboard/knowledge-bases", labelKey: "nav.knowledge_bases", icon: BookOpen, color: "green" },
+            ],
+          },
+          {
+            labelKey: "nav.group_config",
+            items: [
+              { href: "/dashboard/settings/models", labelKey: "nav.models", icon: Cpu, color: "orange" },
+              { href: "/dashboard/settings/api-keys", labelKey: "nav.api_keys", icon: Key, color: "cyan" },
+            ],
+          },
+          {
+            labelKey: "nav.group_admin",
+            items: [
+              { href: "/dashboard/tenant", labelKey: "nav.my_tenant", icon: Users, color: "indigo" },
+              // Team-level analytics and usage & cost live with the admin
+              // tools; members see their personal usage in the chat dialog.
+              { href: "/dashboard/analytics", labelKey: "nav.analytics", icon: BarChart3, color: "purple" },
+              { href: "/dashboard/bills", labelKey: "nav.usage", icon: Coins, color: "amber" },
+              { href: "/dashboard/audit", labelKey: "nav.audit", icon: ScrollText, color: "amber" },
+            ],
+          },
+        ]
       : []),
     ...(isSuperAdmin
       ? [{

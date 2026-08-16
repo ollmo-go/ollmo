@@ -236,8 +236,8 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	protected.Put("/user/profile", userHandler.UpdateProfile)
 	protected.Put("/user/password", userHandler.ChangePassword)
 
-	// Tenant quota.
-	protected.Get("/tenant/quota", func(c *fiber.Ctx) error {
+	// Tenant quota (team-level data; admin only).
+	protected.Get("/tenant/quota", middleware.AdminOnly(), func(c *fiber.Ctx) error {
 		tid := middleware.TenantID(c)
 		t, err := tenantRepo.FindByID(tid)
 		if err != nil {
@@ -382,7 +382,8 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	kbWrite := kbAccess(kbRepo, true)
 
 	kbGrp := protected.Group("/knowledge-bases")
-	kbGrp.Post("/", func(c *fiber.Ctx) error {
+	// Creating KBs is a management action; members only chat with existing KBs.
+	kbGrp.Post("/", middleware.AdminOnly(), func(c *fiber.Ctx) error {
 		var in kb.CreateInput
 		if err := c.BodyParser(&in); err != nil {
 			return response.Fail(c, errs.BadRequest("invalid body: "+err.Error()))
@@ -508,12 +509,13 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	// Knowledge graph entities (GraphRAG).
 	kbGrp.Get("/:kbId/entities", kbRead, graphHandler.List)
 
-	// Execution history: persisted agent-graph runs for replay.
+	// Execution history: persisted agent-graph runs for replay. Traces carry
+	// users' questions/answers, so only KB admins/owners see them.
 	executionRepo := execution.NewRepo(deps.DB)
 	executionHandler := execution.NewHandler(executionRepo)
-	kbGrp.Get("/:kbId/executions", kbRead, executionHandler.List)
-	kbGrp.Get("/:kbId/executions/by-message/:messageId", kbRead, executionHandler.GetByMessage)
-	protected.Get("/executions/:id", executionHandler.Get)
+	kbGrp.Get("/:kbId/executions", kbWrite, executionHandler.List)
+	kbGrp.Get("/:kbId/executions/by-message/:messageId", kbWrite, executionHandler.GetByMessage)
+	protected.Get("/executions/:id", middleware.AdminOnly(), executionHandler.Get)
 
 	// Chat: conversations and messages with SSE streaming.
 	billSvc := bill.NewService(bill.NewRepo(deps.DB))
@@ -569,8 +571,8 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	protected.Delete("/conversations/:id", chatHandler.Delete)
 	protected.Post("/conversations/:id/messages/stream", chatHandler.Stream)
 	protected.Get("/conversations/:id/stream", chatHandler.Subscribe)
-	protected.Post("/knowledge-bases/:kbId/test-chat", kbRead, chatHandler.TestChat)
-	protected.Post("/knowledge-bases/:kbId/debug-node", kbRead, chatHandler.DebugNode)
+	protected.Post("/knowledge-bases/:kbId/test-chat", kbWrite, chatHandler.TestChat)
+	protected.Post("/knowledge-bases/:kbId/debug-node", kbWrite, chatHandler.DebugNode)
 	protected.Get("/quota/messages", chatHandler.MessageQuota)
 
 	// Memory: conversation summaries for cross-session context.
@@ -578,11 +580,12 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	kbGrp.Get("/:kbId/memories", kbRead, memoryHandler.List)
 	kbGrp.Delete("/:kbId/memories/:id", kbWrite, memoryHandler.Delete)
 
-	// API Key management (JWT-protected). Full key is shown only on creation.
+	// API Key management (JWT-protected, admin only: keys grant programmatic
+	// access to the tenant's KBs, so members cannot mint their own).
 	apikeyRepo := apikey.NewRepo(deps.DB)
 	apikeySvc := apikey.NewService(apikeyRepo)
 	apikeyHandler := apikey.NewHandler(apikeySvc)
-	keyGrp := protected.Group("/api-keys")
+	keyGrp := protected.Group("/api-keys", middleware.AdminOnly())
 	keyGrp.Post("/", apikeyHandler.Create)
 	keyGrp.Get("/", apikeyHandler.List)
 	keyGrp.Put("/:id/revoke", apikeyHandler.Revoke)
@@ -603,10 +606,10 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	external.Get("/conversations", chatHandler.List)
 	external.Post("/conversations/:id/messages/stream", chatHandler.Stream)
 
-	// Analytics dashboard (all tenant members can view their tenant's stats).
+	// Analytics dashboard (admin-only team stats).
 	analyticsSvc := analytics.NewService(analytics.NewRepo(deps.DB))
 	analyticsHandler := analytics.NewHandler(analyticsSvc)
-	analyticsGrp := protected.Group("/analytics")
+	analyticsGrp := protected.Group("/analytics", middleware.AdminOnly())
 	analyticsGrp.Get("/overview", analyticsHandler.Overview)
 	analyticsGrp.Get("/documents", analyticsHandler.DocStats)
 	analyticsGrp.Get("/usage", analyticsHandler.KBUsage)
@@ -637,12 +640,13 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 }
 
 // kbAccess returns middleware that checks the caller can access the KB
-// identified by the :kbId (or :id) path param. Tenant admins bypass all
-// KB-level checks. KB owners always pass. For team-visible KBs, any tenant
-// member gets read access. When write is true, only admin or owner pass.
+// identified by the :kbId (or :id) path param. Tenant admins and super
+// admins bypass all KB-level checks. KB owners always pass. For team-visible
+// KBs, any tenant member gets read access. When write is true, only admin or
+// owner pass.
 func kbAccess(kbRepo *kb.Repo, write bool) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if middleware.Role(c) == "admin" {
+		if middleware.Role(c) == "admin" || middleware.IsSuperAdmin(c) {
 			return c.Next()
 		}
 

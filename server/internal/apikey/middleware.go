@@ -18,6 +18,14 @@ func Middleware(repo *Repo) fiber.Handler {
 		}
 		c.Locals("tenant_id", key.TenantID)
 		c.Locals("user_id", key.UserID)
+		// Mirror the JWT middleware's identity locals so downstream role
+		// gates (AdminOnly, kbAccess) treat API-key calls like their owner.
+		if role, superAdmin := repo.UserRole(key.TenantID, key.UserID); role != "" {
+			c.Locals("role", role)
+			if superAdmin {
+				c.Locals("is_super_admin", true)
+			}
+		}
 		return c.Next()
 	}
 }

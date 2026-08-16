@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import { DashboardSidebar } from "@/components/features/dashboard-sidebar";
-import { isAuthenticated } from "@/lib/auth";
+import { isAuthenticated, decodeToken, getToken } from "@/lib/auth";
 import { useSiteName } from "@/lib/use-site-settings";
 import { useUserLocaleSync } from "@/lib/use-user-locale-sync";
 import { useTranslations } from "next-intl";
 
-// Client-side auth gate. Checks for a valid (non-expired) JWT in storage
-// before rendering dashboard pages. If unauthenticated, redirects to /login.
+// Client-side gate. The dashboard is a team-management area: only admins
+// (and super admins) may enter. Unauthenticated users go to /login; regular
+// members go back to the chat home.
 export default function DashboardLayout({
   children,
 }: {
@@ -29,6 +30,13 @@ export default function DashboardLayout({
   useEffect(() => {
     if (!isAuthenticated()) {
       router.replace("/login");
+      return;
+    }
+    const token = getToken();
+    const payload = token ? decodeToken(token) : null;
+    const isSuperAdmin = payload?.is_super_admin ?? false;
+    if (payload?.role !== "admin" && !isSuperAdmin) {
+      router.replace("/");
       return;
     }
     setReady(true);

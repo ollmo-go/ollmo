@@ -55,6 +55,22 @@ func (r *Repo) UpdateLastUsed(id string) error {
 		Update("last_used_at", time.Now()).Error
 }
 
+// UserRole resolves the key owner's role so API-key requests carry the same
+// identity as JWT auth for downstream gating (kbAccess, AdminOnly).
+func (r *Repo) UserRole(tenantID, userID string) (role string, superAdmin bool) {
+	var row struct {
+		Role         string
+		IsSuperAdmin bool
+	}
+	if err := r.db.Table("users").
+		Select("role, is_super_admin").
+		Where("tenant_id = ? AND id = ?", tenantID, userID).
+		Scan(&row).Error; err != nil {
+		return "", false
+	}
+	return row.Role, row.IsSuperAdmin
+}
+
 // Delete removes an API key. When userID is non-empty, the key must belong
 // to that user; empty userID allows deleting any tenant key (admin).
 func (r *Repo) Delete(tenantID, userID, id string) error {
