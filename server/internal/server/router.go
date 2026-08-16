@@ -419,6 +419,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	docGrp.Post("/batch-reparse", kbWrite, docHandler.BatchReparse)
 	docGrp.Get("/:id", kbRead, docHandler.Get)
 	docGrp.Get("/:id/content", kbRead, docHandler.Content)
+	docGrp.Get("/:id/original", kbRead, docHandler.Original)
 	docGrp.Get("/:id/chunks", kbRead, docHandler.ListChunks)
 	docGrp.Put("/:id/chunks/:chunkId", kbWrite, docHandler.UpdateChunk)
 	docGrp.Delete("/:id/chunks/:chunkId", kbWrite, docHandler.DeleteChunk)

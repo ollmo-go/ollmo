@@ -26,6 +26,7 @@ import { logout } from "@/lib/auth";
 import { useSiteSettings } from "@/lib/use-site-settings";
 import { ProfileDialog } from "@/components/features/profile-dialog";
 import { MessageBubble } from "@/components/chat/message-bubble";
+import { DocumentViewer } from "@/components/chat/document-viewer";
 
 function getConvIdFromURL(): string {
   if (typeof window === "undefined") return "";
@@ -109,6 +110,9 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
   const [showList, setShowList] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  // Document viewer side panel: opened by clicking a citation chip. The
+  // full-width chat stays visible next to it on desktop (side-by-side review).
+  const [viewerCitation, setViewerCitation] = useState<Citation | null>(null);
   const confirm = useConfirm();
   const prompt = usePrompt();
 
@@ -835,6 +839,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                         kbId={selectedKb}
                         onEditSend={m.role === "user" ? editSend : undefined}
                         onVote={m.role === "assistant" && m.id !== "greeting" ? vote : undefined}
+                        onCitation={setViewerCitation}
                       />
                       {chips.length > 0 && (
                         <div className="flex flex-wrap gap-2 mt-1">
@@ -868,6 +873,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                     streaming
                     isThinking={!!streamedThinking && !streamedText}
                     kbId={selectedKb}
+                    onCitation={setViewerCitation}
                   />
                 )}
               </div>
@@ -925,6 +931,16 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
           </div>
         )}
       </div>
+      {viewerCitation && selectedKb && (
+        <div className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-border bg-background shadow-2xl sm:w-[48%] lg:w-[44%]">
+          <DocumentViewer
+            kbId={selectedKb}
+            citation={viewerCitation}
+            onClose={() => setViewerCitation(null)}
+            embed
+          />
+        </div>
+      )}
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
     </div>
   );

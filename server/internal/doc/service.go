@@ -392,26 +392,79 @@ func (s *Service) ImportURL(ctx context.Context, tenantID, ownerID, kbID, rawURL
 	return doc, nil
 }
 
-// GetContent returns the parsed document content (markdown/text) stored in
-// MinIO. Used by the document viewer for citation tracing.
-func (s *Service) GetContent(ctx context.Context, tenantID, kbID, docID string) (*Document, string, error) {
+// ContentView is the payload served to the document viewer for citation
+// tracing: the parsed markdown plus page anchors and, when a chunk is
+// requested, the byte offset where its content starts.
+type ContentView struct {
+	Name         string `json:"name"`
+	MimeType     string `json:"mime_type"`
+	Status       string `json:"status"`
+	ChunkCount   int    `json:"chunk_count"`
+	Content      string `json:"content"`
+	PageAnchors  string `json:"page_anchors,omitempty"`
+	AnchorOffset int    `json:"anchor_offset"` // -1 when no chunk or not located
+	AnchorPages  string `json:"anchor_pages,omitempty"`
+}
+
+// GetContentView returns the parsed document content (markdown/text) stored
+// in MinIO, together with page anchors and the requested chunk's offset.
+// Used by the document viewer for citation tracing.
+func (s *Service) GetContentView(ctx context.Context, tenantID, kbID, docID, chunkID string) (*ContentView, error) {
 	doc, err := s.repo.FindDoc(tenantID, kbID, docID)
 	if err != nil {
-		return nil, "", err
+		return nil, err
+	}
+	view := &ContentView{
+		Name:        doc.Name,
+		MimeType:    doc.MimeType,
+		Status:      doc.Status,
+		ChunkCount:  doc.ChunkCount,
+		PageAnchors: doc.PageAnchors,
+		AnchorOffset: -1,
 	}
 	if doc.ParsedObjectKey == "" {
-		return doc, "", nil
+		return view, nil
 	}
 	obj, err := s.minio.GetObject(ctx, s.bucket, doc.ParsedObjectKey, minio.GetObjectOptions{})
 	if err != nil {
-		return nil, "", errs.Wrap(errs.CodeInternal, "fetch parsed content", err)
+		return nil, errs.Wrap(errs.CodeInternal, "fetch parsed content", err)
 	}
 	defer obj.Close()
 	data, err := io.ReadAll(obj)
 	if err != nil {
-		return nil, "", errs.Wrap(errs.CodeInternal, "read parsed content", err)
+		return nil, errs.Wrap(errs.CodeInternal, "read parsed content", err)
 	}
-	return doc, string(data), nil
+	view.Content = string(data)
+
+	if chunkID != "" {
+		chunk, err := s.repo.FindChunk(tenantID, kbID, chunkID)
+		if err == nil {
+			view.AnchorOffset = locateChunkOffset(view.Content, chunk.Content)
+			view.AnchorPages = chunk.PageNumbers
+		}
+	}
+	return view, nil
+}
+
+// OpenOriginal streams the original uploaded file from MinIO. When start/end
+// are non-nil the read is range-limited (for PDF.js incremental loading);
+// returned size is the full object size. Callers must close the reader.
+func (s *Service) OpenOriginal(ctx context.Context, tenantID, kbID, docID string, start, end *int64) (io.ReadCloser, *Document, int64, error) {
+	doc, err := s.repo.FindDoc(tenantID, kbID, docID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	opts := minio.GetObjectOptions{}
+	if start != nil && end != nil {
+		if err := opts.SetRange(*start, *end); err != nil {
+			return nil, nil, 0, errs.Wrap(errs.CodeInternal, "set range", err)
+		}
+	}
+	obj, err := s.minio.GetObject(ctx, s.bucket, doc.ObjectKey, opts)
+	if err != nil {
+		return nil, nil, 0, errs.Wrap(errs.CodeInternal, "fetch original", err)
+	}
+	return obj, doc, doc.Size, nil
 }
 
 func (s *Service) List(ctx context.Context, tenantID, kbID string, page, size int) ([]*Document, int64, error) {

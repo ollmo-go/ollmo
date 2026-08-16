@@ -166,12 +166,13 @@ func (r *Repo) ListDisabledDocIDs(tenantID, kbID string) ([]string, error) {
 	return ids, err
 }
 
-func (r *Repo) UpdateDocParsed(tenantID, id, parsedObjectKey string, chunkCount int) error {
+func (r *Repo) UpdateDocParsed(tenantID, id, parsedObjectKey string, chunkCount int, pageAnchors string) error {
 	return r.db.Model(&Document{}).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
 		Updates(map[string]any{
 			"parsed_object_key": parsedObjectKey,
 			"chunk_count":       chunkCount,
+			"page_anchors":      pageAnchors,
 		}).Error
 }
 

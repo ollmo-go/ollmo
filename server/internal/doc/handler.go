@@ -1,6 +1,8 @@
 package doc
 
 import (
+	"fmt"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -79,19 +81,77 @@ func (h *Handler) Get(c *fiber.Ctx) error {
 }
 
 // Content returns the parsed document content (markdown/text) for the document
-// viewer. Used by citation tracing to display the source document.
+// viewer. With ?chunk_id= it also returns the chunk's byte offset in the
+// content so the viewer can highlight the cited passage in place.
 func (h *Handler) Content(c *fiber.Ctx) error {
-	doc, content, err := h.svc.GetContent(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id"))
+	view, err := h.svc.GetContentView(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id"), c.Query("chunk_id"))
 	if err != nil {
 		return response.Fail(c, err)
 	}
-	return response.OK(c, fiber.Map{
-		"name":        doc.Name,
-		"mime_type":   doc.MimeType,
-		"status":      doc.Status,
-		"chunk_count": doc.ChunkCount,
-		"content":     content,
-	})
+	return response.OK(c, view)
+}
+
+// Original streams the uploaded file (PDF, DOCX, …) with Range support so
+// PDF.js can render the source document page by page.
+func (h *Handler) Original(c *fiber.Ctx) error {
+	var start, end *int64
+	size := int64(-1)
+	if rng := c.Get(fiber.HeaderRange); rng != "" {
+		s, e, ok := parseByteRange(rng)
+		if !ok {
+			return response.Fail(c, errs.New(errs.CodeBadRequest, "malformed Range header"))
+		}
+		start, end = &s, &e
+	}
+	stream, doc, fullSize, err := h.svc.OpenOriginal(c.Context(), middleware.TenantID(c), c.Params("kbId"), c.Params("id"), start, end)
+	if err != nil {
+		return response.Fail(c, err)
+	}
+	defer stream.Close()
+
+	name := doc.Name
+	if name == "" {
+		name = "document"
+	}
+	c.Set(fiber.HeaderAcceptRanges, "bytes")
+	c.Set(fiber.HeaderContentDisposition, `inline; filename*=UTF-8''`+url.PathEscape(name))
+	if doc.MimeType != "" {
+		c.Type(doc.MimeType)
+	} else {
+		c.Type("application/octet-stream")
+	}
+	if start != nil {
+		length := *end - *start + 1
+		size = length
+		c.Status(fiber.StatusPartialContent)
+		c.Set(fiber.HeaderContentRange, fmt.Sprintf("bytes %d-%d/%d", *start, *end, fullSize))
+	} else {
+		size = fullSize
+	}
+	c.Set(fiber.HeaderContentLength, strconv.FormatInt(size, 10))
+	return c.SendStream(stream, int(size))
+}
+
+// parseByteRange parses a single "bytes=start-end" range. Both bounds must be
+// present (PDF.js only issues closed ranges for document fetches).
+func parseByteRange(header string) (int64, int64, bool) {
+	if !strings.HasPrefix(header, "bytes=") {
+		return 0, 0, false
+	}
+	spec := strings.TrimPrefix(header, "bytes=")
+	if i := strings.IndexByte(spec, ','); i >= 0 {
+		return 0, 0, false // multi-range not supported
+	}
+	parts := strings.SplitN(spec, "-", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return 0, 0, false
+	}
+	start, err1 := strconv.ParseInt(parts[0], 10, 64)
+	end, err2 := strconv.ParseInt(parts[1], 10, 64)
+	if err1 != nil || err2 != nil || start < 0 || end < start {
+		return 0, 0, false
+	}
+	return start, end, true
 }
 
 func (h *Handler) List(c *fiber.Ctx) error {

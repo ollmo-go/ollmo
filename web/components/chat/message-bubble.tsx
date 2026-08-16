@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { api, Citation, Message } from "@/lib/api";
 import { dedupeByDoc, formatMs, formatScore, safeParseCitations } from "@/lib/utils";
 import { mdComponents } from "@/lib/markdown";
+import { DocumentViewer } from "@/components/chat/document-viewer";
 
 // normalizeAnnotationContent converts single newlines to double newlines
 // so that ReactMarkdown renders proper paragraph breaks. Annotation answers
@@ -40,6 +41,7 @@ export const MessageBubble = memo(function MessageBubble({
   kbId,
   onEditSend,
   onVote,
+  onCitation,
 }: {
   message: Message;
   streaming?: boolean;
@@ -49,6 +51,10 @@ export const MessageBubble = memo(function MessageBubble({
   // Vote feedback (persisted messages only). Receives the full message so
   // the parent callback can stay referentially stable across renders.
   onVote?: (message: Message, vote: "up" | "down") => void;
+  // Citation click handler. When provided the parent (chat side panel) opens
+  // the document viewer; otherwise the bubble falls back to its own modal
+  // (agent test drawer / standalone contexts).
+  onCitation?: (citation: Citation) => void;
 }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
@@ -173,7 +179,7 @@ export const MessageBubble = memo(function MessageBubble({
               return (
                 <button
                   key={i}
-                  onClick={() => setViewDoc(c)}
+                  onClick={() => (onCitation ? onCitation(c) : setViewDoc(c))}
                   className="opacity-80 hover:opacity-100 hover:underline cursor-pointer flex items-center gap-1.5 text-left"
                 >
                   <span>
@@ -268,97 +274,9 @@ export const MessageBubble = memo(function MessageBubble({
           )}
         </div>
       )}
-      {viewDoc && kbId && (
-        <DocViewerModal kbId={kbId} citation={viewDoc} onClose={() => setViewDoc(null)} />
+      {viewDoc && kbId && !onCitation && (
+        <DocumentViewer kbId={kbId} citation={viewDoc} onClose={() => setViewDoc(null)} />
       )}
     </div>
   );
 });
-
-// DocViewerModal loads a cited document's full content and shows the cited
-// passage alongside it. Opened by clicking a citation in MessageBubble.
-export function DocViewerModal({ kbId, citation, onClose }: {
-  kbId: string;
-  citation: Citation;
-  onClose: () => void;
-}) {
-  const [content, setContent] = useState("");
-  const [docName, setDocName] = useState(citation.doc_name || "");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const t = useTranslations();
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError("");
-    api.getDocContent(kbId, citation.doc_id)
-      .then((res) => {
-        if (cancelled) return;
-        setDocName(res.name || citation.doc_name || "");
-        setContent(res.content || "");
-      })
-      .catch((e: any) => {
-        if (cancelled) return;
-        setError(e?.message || "Failed to load document");
-      })
-      .finally(() => !cancelled && setLoading(false));
-    return () => { cancelled = true; };
-  }, [kbId, citation.doc_id]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-background border rounded-lg shadow-xl w-[90vw] max-w-3xl h-[80vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b">
-          <div className="flex items-center gap-2 min-w-0">
-            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="font-medium truncate">{docName}</span>
-            {citation.page_numbers && (
-              <span className="text-xs text-muted-foreground shrink-0">p.{citation.page_numbers}</span>
-            )}
-          </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-auto p-4 space-y-4">
-          {loading && (
-            <div className="space-y-2">
-              <div className="h-4 bg-muted rounded animate-pulse" />
-              <div className="h-4 bg-muted rounded animate-pulse w-3/4" />
-              <div className="h-4 bg-muted rounded animate-pulse w-1/2" />
-            </div>
-          )}
-          {error && (
-            <div className="text-sm text-destructive">{error}</div>
-          )}
-          {!loading && !error && (
-            <>
-              {citation.content && (
-                <div className="border-l-4 border-primary bg-primary/5 rounded-r p-3">
-                  <p className="text-xs font-medium text-primary mb-1">{t("chat.cited_passage")}</p>
-                  <div className="text-sm whitespace-pre-wrap">{citation.content}</div>
-                </div>
-              )}
-              {content ? (
-                <div className="chat-markdown text-sm">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                    {content}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("chat.no_content")}</p>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}

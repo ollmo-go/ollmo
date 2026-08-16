@@ -210,7 +210,7 @@ func (w *Worker) HandleParse(ctx context.Context, t *asynq.Task) error {
 		}
 	}
 
-	if err := w.svc.MarkParsed(p.TenantID, p.DocID, parsedKey, childCount); err != nil {
+	if err := w.svc.MarkParsed(p.TenantID, p.DocID, parsedKey, childCount, encodePageBlocks(pageBlocks)); err != nil {
 		return fmt.Errorf("mark parsed: %w", err)
 	}
 

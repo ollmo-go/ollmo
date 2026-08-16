@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,9 +12,9 @@ import (
 // pageBlock is a byte range in the parsed markdown that is known to live on
 // one source page (0-based page_idx from MinerU).
 type pageBlock struct {
-	start int
-	end   int
-	page  int
+	Start int `json:"start"`
+	End   int `json:"end"`
+	Page  int `json:"page"`
 }
 
 // anchorPages locates each MinerU content item inside the parsed markdown and
@@ -34,7 +35,7 @@ func anchorPages(markdown string, items []clients.ContentItem) []pageBlock {
 			continue
 		}
 		pos += cursor
-		blocks = append(blocks, pageBlock{start: pos, end: pos + len(anchor), page: it.PageIdx})
+		blocks = append(blocks, pageBlock{Start: pos, End: pos + len(anchor), Page: it.PageIdx})
 		cursor = pos + 1
 	}
 	return blocks
@@ -110,9 +111,9 @@ func pagesInRange(blocks []pageBlock, start, end int) []int {
 	seen := map[int]bool{}
 	var pages []int
 	for _, b := range blocks {
-		if b.start < end && b.end > start && !seen[b.page] {
-			seen[b.page] = true
-			pages = append(pages, b.page+1)
+		if b.Start < end && b.End > start && !seen[b.Page] {
+			seen[b.Page] = true
+			pages = append(pages, b.Page+1)
 		}
 	}
 	sort.Ints(pages)
@@ -135,4 +136,46 @@ func joinPages(pages []int) string {
 		parts = append(parts, strconv.Itoa(p))
 	}
 	return strings.Join(parts, ",")
+}
+
+// encodePageBlocks serializes page anchors for the documents.page_anchors
+// column. Empty input yields "" so legacy rows keep the column NULL.
+func encodePageBlocks(blocks []pageBlock) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(blocks)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// decodePageBlocks parses the persisted page_anchors column. Malformed or
+// empty values yield nil — the viewer simply hides page navigation.
+func decodePageBlocks(s string) []pageBlock {
+	if s == "" {
+		return nil
+	}
+	var blocks []pageBlock
+	if err := json.Unmarshal([]byte(s), &blocks); err != nil {
+		return nil
+	}
+	return blocks
+}
+
+// locateChunkOffset finds a chunk's byte offset in the parsed markdown using
+// the same first-line matching as chunkPageNumbers, so viewer highlighting is
+// consistent with page attribution. Returns -1 when the chunk cannot be
+// located (e.g. content edited after indexing).
+func locateChunkOffset(markdown, chunkContent string) int {
+	first := firstLine(chunkContent)
+	if first == "" {
+		return -1
+	}
+	pos := strings.Index(markdown, first)
+	if pos < 0 {
+		return -1
+	}
+	return pos
 }

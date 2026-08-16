@@ -154,6 +154,13 @@ export interface DocContent {
   status: string;
   chunk_count: number;
   content: string;
+  // Page anchors map parsed-markdown byte ranges to source pages (MinerU
+  // only). JSON: [{"start":0,"end":120,"page":0},...]
+  page_anchors?: string;
+  // Byte offset of the requested chunk inside `content` (-1 when absent or
+  // not located). Used by the viewer to highlight the cited passage.
+  anchor_offset?: number;
+  anchor_pages?: string;
 }
 
 export interface LLMModel {
@@ -842,8 +849,9 @@ export const api = {
   async listChunks(kbId: string, docId: string): Promise<{ items: Chunk[] }> {
     return request(`/knowledge-bases/${kbId}/documents/${docId}/chunks`);
   },
-  async getDocContent(kbId: string, docId: string): Promise<DocContent> {
-    return request(`/knowledge-bases/${kbId}/documents/${docId}/content`);
+  async getDocContent(kbId: string, docId: string, chunkId?: string): Promise<DocContent> {
+    const q = chunkId ? `?chunk_id=${encodeURIComponent(chunkId)}` : "";
+    return request(`/knowledge-bases/${kbId}/documents/${docId}/content${q}`);
   },
   async updateChunk(kbId: string, docId: string, chunkId: string, content: string): Promise<Chunk> {
     return request(`/knowledge-bases/${kbId}/documents/${docId}/chunks/${chunkId}`, {
@@ -1432,6 +1440,28 @@ export const api = {
     return json.data;
   },
 };
+
+// fetchOriginal downloads the uploaded file bytes (PDF.js document loading).
+// An optional byte Range enables incremental loading of large files.
+export async function fetchOriginal(
+  kbId: string,
+  docId: string,
+  range?: { start: number; end: number }
+): Promise<ArrayBuffer> {
+  const token = getToken();
+  const res = await fetch(
+    `${API_BASE}/api/v1/knowledge-bases/${kbId}/documents/${docId}/original`,
+    {
+      credentials: "include",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
+      },
+    }
+  );
+  if (!res.ok) throw new ApiError(`load original failed: ${res.status}`, res.status);
+  return await res.arrayBuffer();
+}
 
 export interface TraceStep {
   node_id?: string;

@@ -29,10 +29,10 @@ func TestAnchorPages(t *testing.T) {
 		t.Fatalf("expected 4 anchored blocks, got %d", len(blocks))
 	}
 	for i, b := range blocks {
-		if b.page != pageFixture.items[i].PageIdx {
-			t.Errorf("block %d: page=%d, want %d", i, b.page, pageFixture.items[i].PageIdx)
+		if b.Page != pageFixture.items[i].PageIdx {
+			t.Errorf("block %d: page=%d, want %d", i, b.Page, pageFixture.items[i].PageIdx)
 		}
-		if !strings.Contains(pageFixture.markdown[b.start:b.end], itemAnchorText(pageFixture.items[i])) {
+		if !strings.Contains(pageFixture.markdown[b.Start:b.End], itemAnchorText(pageFixture.items[i])) {
 			t.Errorf("block %d range does not cover its anchor text", i)
 		}
 	}
@@ -95,5 +95,16 @@ func TestJoinPagesCap(t *testing.T) {
 	got := joinPages(pages)
 	if len(got) > 64 {
 		t.Errorf("joinPages exceeded column width: len=%d", len(got))
+	}
+}
+
+func TestLocateChunkOffset(t *testing.T) {
+	md := pageFixture.markdown
+	off := locateChunkOffset(md, "Second paragraph on page one.\n")
+	if off < 0 || !strings.HasPrefix(md[off:], "Second paragraph on page one.") {
+		t.Errorf("locateChunkOffset failed: got %d", off)
+	}
+	if locateChunkOffset(md, "not present anywhere") != -1 {
+		t.Error("expected -1 for unmatchable chunk")
 	}
 }

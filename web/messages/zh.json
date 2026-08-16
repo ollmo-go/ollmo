@@ -213,6 +213,16 @@
     "no_record": "该回答产生于执行记录功能上线之前，无回放数据。",
     "empty": "暂无执行记录。发起一次对话或测试后再来看看。"
   },
+  "viewer": {
+    "mode_original": "原版",
+    "mode_parsed": "解析",
+    "page": "第",
+    "page_suffix": "页",
+    "prev_page": "上一页",
+    "next_page": "下一页",
+    "loading": "加载文档…",
+    "page_level_only": "未能定位引用段落，已标注所在页"
+  },
   "llm": {
     "title": "模型配置",
     "create": "添加模型",

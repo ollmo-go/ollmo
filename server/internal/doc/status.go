@@ -15,8 +15,8 @@ func (s *Service) MarkParsing(tenantID, id string) error {
 	return nil
 }
 
-func (s *Service) MarkParsed(tenantID, id, parsedObjectKey string, chunkCount int) error {
-	if err := s.repo.UpdateDocParsed(tenantID, id, parsedObjectKey, chunkCount); err != nil {
+func (s *Service) MarkParsed(tenantID, id, parsedObjectKey string, chunkCount int, pageAnchors string) error {
+	if err := s.repo.UpdateDocParsed(tenantID, id, parsedObjectKey, chunkCount, pageAnchors); err != nil {
 		return err
 	}
 	if err := s.repo.UpdateDocStatus(tenantID, id, StatusParsed, ""); err != nil {

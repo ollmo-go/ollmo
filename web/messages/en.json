@@ -214,6 +214,16 @@
     "empty": "No executions yet. Start a conversation or a test run first.",
     "no_record": "This answer predates execution recording; no replay data."
   },
+  "viewer": {
+    "mode_original": "Original",
+    "mode_parsed": "Parsed",
+    "page": "Page",
+    "page_suffix": "",
+    "prev_page": "Previous page",
+    "next_page": "Next page",
+    "loading": "Loading document…",
+    "page_level_only": "Passage not located on this page — page-level highlight only"
+  },
   "llm": {
     "title": "Model Configs",
     "create": "Add Model",

@@ -30,6 +30,10 @@ type Document struct {
 	// retrieval filters (e.g. {"source":"hr"}). Stored as text for portability;
 	// MySQL JSON functions still operate on the valid JSON string.
 	Metadata   string    `gorm:"type:text" json:"metadata,omitempty"`
+	// PageAnchors maps parsed-markdown byte ranges to source pages (MinerU
+	// only), persisted so the document viewer can paginate without re-running
+	// the parser. JSON: [{"start":0,"end":120,"page":0},...]
+	PageAnchors string    `gorm:"type:mediumtext" json:"page_anchors,omitempty"`
 	Status     string    `gorm:"size:32;not null;default:queued;index:idx_doc_tenant_kb_status,priority:3" json:"status"`
 	ParseError string    `gorm:"size:512" json:"parse_error,omitempty"`
 	Enabled    bool      `gorm:"not null;default:true" json:"enabled"`
