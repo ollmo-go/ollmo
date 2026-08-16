@@ -23,11 +23,11 @@
 
 ---
 
-![ollmo agent](agent-canvas.png)
+![ollmo agent](screenshots/agent-canvas.png)
 
-![ollmo provider models](provider-models.png)
+![ollmo provider models](screenshots/provider-models.png)
 
-![ollmo chat](chat.png)
+![ollmo chat](screenshots/chat.png)
 
 ## 为什么做 ollmo
 
@@ -244,12 +244,13 @@ make clean         # 清理构建产物
 
 - [系统演示](https://demo.ollmo.com/) — 部署前先体验。
 
-### 相关文章
+## 社区与交流
 
-- [知识库问答系统怎么选？我开源了一个 10 分钟上手的 RAG 平台 ollmo（CSDN）](https://blog.csdn.net/gushing/article/details/163796514)
-- [知识库问答系统怎么选？我开源了一个 10 分钟上手的 RAG 平台 ollmo（博客园）](https://www.cnblogs.com/itouchfish/p/22504574.html)
-- [我开源了一个知识库问答平台：三步上手，聊聊设计取舍（掘金）](https://juejin.cn/post/7674341421613957129)
-- [我开源了一个知识库问答平台：三步上手，聊聊设计取舍（思否）](https://segmentfault.com/a/1190000048165780)
+- 💬 **QQ 交流群**：`656868`（加群请备注 ollmo）
+
+![QQ 群二维码](screenshots/qq-group.jpg)
+
+- 🐛 问题反馈：[GitHub Issues](https://github.com/ollmo-go/ollmo/issues)
 
 ## 路线图
 
