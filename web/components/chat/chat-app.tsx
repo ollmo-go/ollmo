@@ -969,12 +969,12 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
               <div className="flex items-center gap-2">
                 <Logo showName={false} size="h-6 w-6" />
                 {kbs?.items?.find((k) => k.id === selectedKb)?.name && (
-                  <span className="text-sm font-medium">
+                  <span className="text-lg font-medium">
                     {kbs.items.find((k) => k.id === selectedKb)!.name}
                   </span>
                 )}
               </div>
-              <h2 className="max-w-xl text-lg font-medium tracking-tight md:text-xl">
+              <h2 className="max-w-xl text-base font-medium tracking-tight md:text-lg">
                 {greeting || t("chat.welcome_title")}
               </h2>
               {!greeting && (
