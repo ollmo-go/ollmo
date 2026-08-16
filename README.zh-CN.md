@@ -25,9 +25,15 @@
 
 ![ollmo agent](screenshots/agent-canvas.png)
 
+*Agent 画布 —— 可视化编排对话流水线(意图分类 → 检索 → 条件分支 → LLM),支持单节点调试与运行时高亮*
+
 ![ollmo provider models](screenshots/provider-models.png)
 
+*模型设置 —— 供应商卡片与双栏模型选择器,LLM / Embedding / Rerank 模型知识库级可单独指定*
+
 ![ollmo chat](screenshots/chat.png)
+
+*知识问答 —— 流式回答附带来源引用,点击引用即可打开源文档并高亮命中段落*
 
 ## 为什么做 ollmo
 

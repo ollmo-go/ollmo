@@ -25,9 +25,15 @@ English | [简体中文](README.zh-CN.md)
 
 ![ollmo agent](screenshots/agent-canvas.png)
 
+*Agent canvas — visually orchestrate the conversation pipeline (intent classification → retrieval → condition branch → LLM), with per-node debugging and runtime highlighting*
+
 ![ollmo provider models](screenshots/provider-models.png)
 
+*Model settings — provider cards with the two-column model picker; LLM / Embedding / Rerank models can be pinned per knowledge base*
+
 ![ollmo chat](screenshots/chat.png)
+
+*Knowledge Q&A — streaming replies with source citations; click a citation to open the source document with the passage highlighted*
 
 ## Why ollmo
 
