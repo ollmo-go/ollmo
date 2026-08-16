@@ -969,7 +969,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
               <div className="flex items-center gap-2">
                 <Logo showName={false} size="h-6 w-6" />
                 {kbs?.items?.find((k) => k.id === selectedKb)?.name && (
-                  <span className="text-lg font-medium">
+                  <span className="text-2xl font-bold">
                     {kbs.items.find((k) => k.id === selectedKb)!.name}
                   </span>
                 )}
