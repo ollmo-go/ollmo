@@ -132,7 +132,7 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
           className="hover:opacity-80 transition-opacity"
           onClick={onNavigate}
         >
-          <Logo />
+          <Logo forceDefault />
         </Link>
         {onNavigate && (
           <button

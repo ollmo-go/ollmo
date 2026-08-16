@@ -19,6 +19,9 @@ const (
 	KeyTimezone          = "timezone"
 	KeyAllowRegistration = "allow_registration"
 	KeyAutoMemory        = "auto_memory"
+	// KeySiteLogo holds the custom site logo as a data URL (PNG/JPG/WebP/SVG).
+	// Empty means "use the built-in default logo".
+	KeySiteLogo = "site_logo"
 )
 
 // Defaults returns the initial settings seeded on first run.
@@ -42,4 +45,5 @@ var PublicKeys = []string{
 	KeyDefaultLanguage,
 	KeyTimezone,
 	KeyAllowRegistration,
+	KeySiteLogo,
 }

@@ -667,6 +667,12 @@
     "allow_registration_desc": "开启后新用户才可自行注册",
     "auto_memory": "自动记忆",
     "auto_memory_desc": "对话达到一定长度后自动生成摘要，供后续对话参考。会额外消耗 LLM 额度",
+    "logo_title": "站点 Logo",
+    "logo_hint": "支持 PNG / JPG / WebP / SVG，不超过 512KB。上传后替换全站左上角 Logo，留空则使用默认图标",
+    "logo_upload": "上传 Logo",
+    "logo_reset": "恢复默认",
+    "logo_reset_desc": "移除自定义 Logo，恢复为内置默认图标",
+    "logo_too_large": "Logo 文件过大（最大 512KB）",
     "saved": "系统设置已保存",
     "lang_zh": "中文",
     "lang_en": "English"

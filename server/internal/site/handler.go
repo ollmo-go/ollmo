@@ -40,6 +40,11 @@ func (h *Handler) Update(c *fiber.Ctx) error {
 	if len(in) == 0 {
 		return response.Fail(c, errs.BadRequest("no settings to update"))
 	}
+	if v, ok := in[KeySiteLogo]; ok {
+		if err := ValidateLogo(v); err != nil {
+			return response.Fail(c, err)
+		}
+	}
 	if err := h.svc.Update(in); err != nil {
 		return response.Fail(c, err)
 	}

@@ -11,6 +11,8 @@ export interface SiteSettings {
   default_language: string;
   timezone: string;
   allow_registration: string;
+  // Custom site logo as a data URL; empty means the built-in default logo.
+  site_logo?: string;
 }
 
 // useSiteSettings fetches public site settings (site name, language, etc.)

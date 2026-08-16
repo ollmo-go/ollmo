@@ -1,23 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import useSWR from "swr";
+import useSWR, { mutate as globalMutate } from "swr";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, RotateCcw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useTranslations } from "next-intl";
+import { Logo } from "@/components/brand/logo";
+import { useConfirm } from "@/components/ui/confirm";
+
+// Logo upload: read the file as a data URL, cap at 512KB, then persist via
+// the regular site settings endpoint (the logo is the site_logo setting).
+async function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function SystemSettingsPage() {
   const t = useTranslations();
+  const confirm = useConfirm();
   const { data, mutate } = useSWR("site-settings-all", () => api.getAllSiteSettings());
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [logoSaving, setLogoSaving] = useState(false);
 
   useEffect(() => {
     if (data) setForm(data);
@@ -38,6 +54,49 @@ export default function SystemSettingsPage() {
       mutate();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleLogoFile(file: File) {
+    if (file.size > 512 * 1024) {
+      toast.error(t("system.logo_too_large"));
+      return;
+    }
+    setLogoSaving(true);
+    try {
+      const url = await fileToDataUrl(file);
+      await api.updateSiteSettings({ site_logo: url });
+      set("site_logo", url);
+      await mutate();
+      // Refresh the public settings cache so every Logo instance updates.
+      globalMutate("site-settings", (d: unknown) => ({ ...(d as object), site_logo: url }), false);
+      toast.success(t("system.saved"));
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setLogoSaving(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function handleLogoReset() {
+    const ok = await confirm({
+      title: t("system.logo_reset"),
+      description: t("system.logo_reset_desc"),
+      confirmText: t("system.logo_reset"),
+    });
+    if (!ok) return;
+    setLogoSaving(true);
+    try {
+      await api.updateSiteSettings({ site_logo: "" });
+      set("site_logo", "");
+      await mutate();
+      globalMutate("site-settings", (d: unknown) => ({ ...(d as object), site_logo: "" }), false);
+      toast.success(t("system.saved"));
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setLogoSaving(false);
     }
   }
 
@@ -153,6 +212,45 @@ export default function SystemSettingsPage() {
                   }`}
                 />
               </button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Site logo */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">{t("system.logo_title")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-16 w-16 items-center justify-center rounded-md border bg-muted/30">
+                <Logo showName={false} size="h-10 w-10" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">{t("system.logo_hint")}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleLogoFile(f);
+                }}
+              />
+              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={logoSaving}>
+                {logoSaving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                {t("system.logo_upload")}
+              </Button>
+              {!!form.site_logo && (
+                <Button variant="ghost" onClick={handleLogoReset} disabled={logoSaving}>
+                  <RotateCcw className="h-4 w-4 mr-1" />
+                  {t("system.logo_reset")}
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -668,6 +668,12 @@
     "allow_registration_desc": "When enabled, new users can self-register",
     "auto_memory": "Auto Memory",
     "auto_memory_desc": "Automatically summarize conversations once they grow long enough, so future chats can reference past context. Consumes extra LLM quota",
+    "logo_title": "Site Logo",
+    "logo_hint": "PNG / JPG / WebP / SVG, up to 512KB. Replaces the top-left logo site-wide; empty restores the built-in icon",
+    "logo_upload": "Upload Logo",
+    "logo_reset": "Restore default",
+    "logo_reset_desc": "Remove the custom logo and fall back to the built-in icon",
+    "logo_too_large": "Logo file too large (max 512KB)",
     "saved": "System settings saved",
     "lang_zh": "Chinese",
     "lang_en": "English"

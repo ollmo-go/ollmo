@@ -92,6 +92,12 @@ func RunMigrate(cfg *config.Config) error {
 		return fmt.Errorf("backfill providers: %w", err)
 	}
 
+	// The site logo is stored as a data URL in site_settings.value; TEXT
+	// (64KB) is too small for a 512KB logo. Idempotent by nature.
+	if err := gormDB.Exec("ALTER TABLE site_settings MODIFY value MEDIUMTEXT").Error; err != nil {
+		return fmt.Errorf("widen site_settings.value: %w", err)
+	}
+
 	log.Println("[migrate] schema applied: tenants, tenant_members, users, knowledge_bases, documents, chunks, llm_models, embedding_models, rerank_models, model_providers, conversations, messages, pipelines, graph_entities, graph_relations, agents, memories")
 	log.Println("[migrate] fulltext index idx_chunks_content_ft (ngram parser) ensured on chunks.content")
 
