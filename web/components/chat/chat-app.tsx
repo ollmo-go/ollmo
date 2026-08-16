@@ -127,6 +127,12 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Mirror of the messages state for collision checks outside setMessages
+  // updaters (the server-assigned message id must be unique in the list).
+  const messagesRef = useRef<Message[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { data: kbs } = useSWR(authed ? "kb-list" : null, () => api.listKBs(1, 50));
@@ -468,6 +474,9 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     let thinkAcc = "";
     let cits: Citation[] = [];
     let doneMsgId = "";
+    // The id actually used for the appended assistant row. Guards against a
+    // server that reuses a message id already present in the list.
+    let doneFinalId = "";
     let streamError = "";
     let doneStats: ReplyStats | undefined;
     let annReply = false;
@@ -485,10 +494,14 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         ? (acc ? `${acc}\n\n⚠️ ${errMsg}` : `⚠️ ${errMsg}`)
         : acc;
       if (content) {
+        doneFinalId =
+          doneMsgId && !messagesRef.current.some((x) => x.id === doneMsgId)
+            ? doneMsgId
+            : crypto.randomUUID();
         setMessages((m) => [
           ...m,
           {
-            id: doneMsgId || crypto.randomUUID(),
+            id: doneFinalId,
             tenant_id: "",
             conversation_id: convId,
             role: "assistant",
@@ -529,7 +542,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
         // them onto the already-finalized message row.
         onFollowUps: (qs) => {
           const b = JSON.stringify(qs);
-          setMessages((m) => m.map((x) => (x.id === doneMsgId ? { ...x, follow_ups: b } : x)));
+          setMessages((m) => m.map((x) => (x.id === doneFinalId ? { ...x, follow_ups: b } : x)));
         },
       });
       streamError = error ?? "";
