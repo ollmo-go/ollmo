@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
-import { Brain, ChevronLeft, Download, LogOut, MessageSquare, PanelLeft, Pin, Plus, Send, Settings, Square, Trash2, Pencil, User, LogIn } from "lucide-react";
+import { Brain, ChevronLeft, Download, MessageSquare, PanelLeft, Pin, Plus, Send, Square, Trash2, Pencil, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,9 +23,9 @@ import {
 } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { consumeChatStream } from "@/lib/stream";
-import { logout } from "@/lib/auth";
 import { useSiteSettings } from "@/lib/use-site-settings";
 import { ProfileDialog } from "@/components/features/profile-dialog";
+import { UserMenu } from "@/components/features/user-menu";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { DocumentViewer } from "@/components/chat/document-viewer";
 
@@ -442,16 +442,6 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     }
   }
 
-  async function handleLogout() {
-    const ok = await confirm({
-      title: t("nav.sign_out"),
-      description: t("nav.sign_out_confirm"),
-      confirmText: t("nav.sign_out"),
-    });
-    if (!ok) return;
-    logout();
-  }
-
   async function send(overrideText?: string) {
     const text = (overrideText ?? draft).trim();
     if (!text || streaming) return;
@@ -827,36 +817,13 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
               </p>
             )}
           </div>
-          <div className="border-t pt-2 space-y-1">
-            {profile?.tenant_name && (
-              <p className="px-2 pb-1 text-xs text-muted-foreground truncate">
-                {t("nav.tenant")}: {profile.tenant_name}
-              </p>
-            )}
-            {isAdmin && (
-              <Link
-                href="/dashboard"
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent/60"
-              >
-                <Settings className="h-4 w-4 shrink-0" />
-                {t("nav.admin")}
-              </Link>
-            )}
-            <button
-              onClick={() => setProfileOpen(true)}
-              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 w-full"
-            >
-              <User className="h-4 w-4 shrink-0" />
-              <span className="truncate">{profile?.name || t("nav.profile")}</span>
-            </button>
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 w-full"
-            >
-              <LogOut className="h-4 w-4 shrink-0" />
-              {t("nav.sign_out")}
-            </button>
-          </div>
+          <UserMenu
+            variant="chat"
+            profile={profile}
+            isAdmin={isAdmin}
+            onOpenProfile={() => setProfileOpen(true)}
+            onNavigate={() => setShowList(false)}
+          />
         </CardContent>
       </Card>
 

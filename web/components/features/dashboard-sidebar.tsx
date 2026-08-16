@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, BarChart3, Cpu, ExternalLink, Key, LayoutDashboard, LogOut, ScrollText, Settings, ShieldAlert, User, UserCog, Users, X } from "lucide-react";
+import { BookOpen, BarChart3, Cpu, Key, LayoutDashboard, ScrollText, Settings, ShieldAlert, UserCog, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useTranslations } from "next-intl";
-import { useConfirm } from "@/components/ui/confirm";
 import { decodeToken, getToken } from "@/lib/auth";
 import { Logo } from "@/components/brand/logo";
+import { UserMenu } from "@/components/features/user-menu";
 
 type NavItem = {
   href: string;
@@ -43,11 +43,9 @@ const ICON_COLOR: Record<string, string> = {
 
 export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const [loggingOut, setLoggingOut] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const t = useTranslations();
-  const confirm = useConfirm();
   const { data: profile } = useSWR("profile", () => api.getProfile());
 
   // Derive admin/super-admin status from the JWT payload.
@@ -110,17 +108,6 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
         } as NavGroup]
       : []),
   ];
-
-  async function handleLogout() {
-    const ok = await confirm({
-      title: t("nav.sign_out"),
-      description: t("nav.sign_out_confirm"),
-      confirmText: t("nav.sign_out"),
-    });
-    if (!ok) return;
-    setLoggingOut(true);
-    await api.logout();
-  }
 
   return (
     <aside className="w-64 border-r bg-muted/30 p-4 flex flex-col sticky top-0 h-screen">
@@ -195,42 +182,12 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         ))}
       </nav>
-      <div className="space-y-1 pt-2 border-t">
-        {profile?.tenant_name && (
-          <p className="px-3 pb-1 text-xs text-muted-foreground truncate">
-            {t("nav.tenant")}: {profile.tenant_name} · {profile?.role === "admin" ? t("profile.role_admin") : t("profile.role_member")}
-          </p>
-        )}
-        <Link
-          href="/"
-          onClick={onNavigate}
-          className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-        >
-          <ExternalLink className="h-4 w-4 shrink-0 text-cyan-500 dark:text-cyan-400" />
-          <span className="truncate">{t("nav.back_to_chat")}</span>
-        </Link>
-        <Link
-          href="/dashboard/profile"
-          onClick={onNavigate}
-          className={cn(
-            "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm",
-            pathname?.startsWith("/dashboard/profile")
-              ? "bg-accent text-primary font-medium"
-              : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          )}
-        >
-          <User className={cn("h-4 w-4 shrink-0", pathname?.startsWith("/dashboard/profile") ? "text-primary" : "text-rose-500 dark:text-rose-400")} />
-          <span className="truncate">{profile?.name || t("nav.profile")}</span>
-        </Link>
-        <button
-          onClick={handleLogout}
-          disabled={loggingOut}
-          className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 disabled:opacity-50 w-full"
-        >
-          <LogOut className="h-4 w-4" />
-          {loggingOut ? t("nav.signing_out") : t("nav.sign_out")}
-        </button>
-      </div>
+      <UserMenu
+        variant="dashboard"
+        profile={profile}
+        onNavigate={onNavigate}
+        onLogout={() => api.logout()}
+      />
     </aside>
   );
 }
