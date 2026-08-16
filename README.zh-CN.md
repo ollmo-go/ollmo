@@ -19,6 +19,8 @@
 
 </div>
 
+> 🚀 **在线演示**：[demo.ollmo.com](https://demo.ollmo.com/) —— 账号 `demo@ollmo.com`，密码 `ollmo123`，免部署直接体验。
+
 ---
 
 ![ollmo agent](agent-canvas.png)
@@ -241,6 +243,13 @@ make clean         # 清理构建产物
 ## 文档
 
 - [系统演示](https://demo.ollmo.com/) — 部署前先体验。
+
+### 相关文章
+
+- [知识库问答系统怎么选？我开源了一个 10 分钟上手的 RAG 平台 ollmo（CSDN）](https://blog.csdn.net/gushing/article/details/163796514)
+- [知识库问答系统怎么选？我开源了一个 10 分钟上手的 RAG 平台 ollmo（博客园）](https://www.cnblogs.com/itouchfish/p/22504574.html)
+- [我开源了一个知识库问答平台：三步上手，聊聊设计取舍（掘金）](https://juejin.cn/post/7674341421613957129)
+- [我开源了一个知识库问答平台：三步上手，聊聊设计取舍（思否）](https://segmentfault.com/a/1190000048165780)
 
 ## 路线图
 

@@ -19,6 +19,8 @@ English | [简体中文](README.zh-CN.md)
 
 </div>
 
+> 🚀 **Live demo**: [demo.ollmo.com](https://demo.ollmo.com/) — account `demo@ollmo.com`, password `ollmo123`. Try it without deploying.
+
 ---
 
 ![ollmo agent](agent-canvas.png)
@@ -241,6 +243,13 @@ make clean         # Remove build artifacts
 ## Documentation
 
 - [Live Demo](https://demo.ollmo.com/) — Try it before you deploy.
+
+### Related Articles
+
+- [How to choose a knowledge-base Q&A system? I open-sourced ollmo, a 10-minute RAG platform (CSDN, zh)](https://blog.csdn.net/gushing/article/details/163796514)
+- [How to choose a knowledge-base Q&A system? I open-sourced ollmo, a 10-minute RAG platform (CNBlogs, zh)](https://www.cnblogs.com/itouchfish/p/22504574.html)
+- [I open-sourced a knowledge-base Q&A platform: three steps to start, design trade-offs (Juejin, zh)](https://juejin.cn/post/7674341421613957129)
+- [I open-sourced a knowledge-base Q&A platform: three steps to start, design trade-offs (SegmentFault, zh)](https://segmentfault.com/a/1190000048165780)
 
 ## Roadmap
 
