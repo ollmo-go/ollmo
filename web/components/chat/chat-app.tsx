@@ -965,14 +965,16 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                 headline is the knowledge base's opening message (Agent
                 canvas); fall back to the site description, then the default
                 welcome copy. */}
-            <div className="mb-8 flex flex-col items-center gap-3 text-center">
-              <Logo showName={false} size="h-12 w-12" />
-              {kbs?.items?.find((k) => k.id === selectedKb)?.name && (
-                <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-                  {kbs.items.find((k) => k.id === selectedKb)!.name}
-                </p>
-              )}
-              <h2 className="max-w-xl text-2xl font-semibold tracking-tight md:text-3xl">
+            <div className="mb-12 flex flex-col items-center gap-8 text-center">
+              <div className="flex items-center gap-2">
+                <Logo showName={false} size="h-6 w-6" />
+                {kbs?.items?.find((k) => k.id === selectedKb)?.name && (
+                  <span className="text-sm font-medium">
+                    {kbs.items.find((k) => k.id === selectedKb)!.name}
+                  </span>
+                )}
+              </div>
+              <h2 className="max-w-xl text-lg font-medium tracking-tight md:text-xl">
                 {greeting || t("chat.welcome_title")}
               </h2>
               {!greeting && (
