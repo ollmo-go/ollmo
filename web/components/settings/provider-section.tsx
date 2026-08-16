@@ -1010,10 +1010,6 @@ function ModelListEditor({
 
       {models.map((m) => {
         const open = expanded.has(m.key);
-        const ctxBadge =
-          m.context_length && m.context_length > 0
-            ? `${formatCapacity(m.context_length)} ctx`
-            : "";
         return (
           <div key={m.key} className="rounded-md border border-input px-2 py-1.5">
             <div className="flex items-center gap-2">
@@ -1037,14 +1033,6 @@ function ModelListEditor({
                 disabled={disabled}
                 onChange={(e) => patch(m.key, { name: e.target.value })}
               />
-              {!!ctxBadge && (
-                <span
-                  title={t("settings.model_context_window")}
-                  className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                >
-                  {ctxBadge}
-                </span>
-              )}
               <button
                 type="button"
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
@@ -1227,6 +1215,15 @@ function capacityLabel(field: CapacityFieldKey, t: ReturnType<typeof useTranslat
   return t("settings.model_output_price");
 }
 
+// Price fields carry their per-1M-token unit in a hover tooltip so the
+// short label never wraps inside the disclosure grid.
+function capacityUnitHint(field: CapacityFieldKey, t: ReturnType<typeof useTranslations>): string | undefined {
+  if (field === "input_price" || field === "output_price") {
+    return t("settings.model_price_unit");
+  }
+  return undefined;
+}
+
 // One capacity field inside a row's disclosure: a small labeled input that
 // edits K/M-suffixed text and settles back to the canonical value on blur.
 function CapacityField({
@@ -1250,7 +1247,12 @@ function CapacityField({
 }) {
   return (
     <label className="space-y-1">
-      <span className="text-[11px] text-muted-foreground">{capacityLabel(field, t)}</span>
+      <span
+        className="text-[11px] text-muted-foreground"
+        title={capacityUnitHint(field, t)}
+      >
+        {capacityLabel(field, t)}
+      </span>
       <Input
         className="h-8 text-xs"
         inputMode="numeric"
