@@ -75,7 +75,6 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
       items: [
         { href: "/dashboard/knowledge-bases", labelKey: "nav.knowledge_bases", icon: BookOpen, color: "green" },
         { href: "/dashboard/analytics", labelKey: "nav.analytics", icon: BarChart3, color: "purple" },
-        { href: "/dashboard/bills", labelKey: "nav.usage", icon: Coins, color: "amber" },
       ],
     },
     {
@@ -90,6 +89,9 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
           labelKey: "nav.group_admin",
           items: [
             { href: "/dashboard/tenant", labelKey: "nav.my_tenant", icon: Users, color: "indigo" },
+            // Team-level usage & cost lives with the admin tools; members see
+            // their personal usage in the chat profile dialog instead.
+            { href: "/dashboard/bills", labelKey: "nav.usage", icon: Coins, color: "amber" },
             { href: "/dashboard/audit", labelKey: "nav.audit", icon: ScrollText, color: "amber" },
           ],
         } as NavGroup]

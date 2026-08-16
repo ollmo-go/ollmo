@@ -615,15 +615,15 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 
 	// Usage & cost (bill rows written per LLM call). /mine is the personal
 	// view used by the chat profile dialog (any authenticated user); the
-	// tenant-wide aggregates are admin-only so members never see other
-	// users' consumption.
+	// tenant-wide aggregates are admin-only team-management data, so members
+	// never see other users' consumption.
 	billHandler := bill.NewHandler(billSvc)
 	billGrp := protected.Group("/bills")
 	billGrp.Get("/mine", billHandler.Mine)
-	billGrp.Get("/overview", billHandler.Overview)
+	billGrp.Get("/overview", middleware.AdminOnly(), billHandler.Overview)
 	billGrp.Get("/users", middleware.AdminOnly(), billHandler.Users)
-	billGrp.Get("/models", billHandler.Models)
-	billGrp.Get("/records", billHandler.Records)
+	billGrp.Get("/models", middleware.AdminOnly(), billHandler.Models)
+	billGrp.Get("/records", middleware.AdminOnly(), billHandler.Records)
 
 	// Audit logging (admin only).
 	auditHandler := audit.NewHandler(auditSvc)
