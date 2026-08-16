@@ -251,7 +251,8 @@ export default function KBDetailPage() {
     setViewChunks({ docId: doc.id, docName: doc.name, chunks: [] });
     try {
       const res = await api.listChunks(kbId, doc.id);
-      setViewChunks({ docId: doc.id, docName: doc.name, chunks: res.items });
+      // `?? []` guards against a malformed response crashing the whole page.
+      setViewChunks({ docId: doc.id, docName: doc.name, chunks: res?.items ?? [] });
     } catch (e) {
       toast.error((e as Error).message);
       setViewChunks(null);
