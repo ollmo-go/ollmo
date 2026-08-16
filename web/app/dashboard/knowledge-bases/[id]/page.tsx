@@ -542,7 +542,14 @@ export default function KBDetailPage() {
     }
   }
 
+  // Doc statuses known to have translations. Unknown values (e.g. from a
+  // future backend) render raw instead of triggering MISSING_MESSAGE noise.
+  const knownStatuses = new Set([
+    "queued", "parsing", "parsed", "embedding", "ready", "failed", "uploaded",
+  ]);
+
   function statusLabel(status: string): string {
+    if (!knownStatuses.has(status)) return status;
     const key = `doc.status_key.${status}`;
     const translated = t(key);
     return translated === key ? status : translated;
