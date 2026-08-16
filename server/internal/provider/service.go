@@ -66,10 +66,14 @@ type CreateInput struct {
 }
 
 // ModelInput is one model row, at create time or as an edit.
+// MaxTokens/prices are chat-specific and ignored by other kinds.
 type ModelInput struct {
-	Model         string `json:"model"`
-	Name          string `json:"name"`
-	ContextLength int    `json:"context_length"`
+	Model         string  `json:"model"`
+	Name          string  `json:"name"`
+	ContextLength int     `json:"context_length"`
+	MaxTokens     int     `json:"max_tokens"`
+	InputPrice    float64 `json:"input_price"`
+	OutputPrice   float64 `json:"output_price"`
 }
 
 // UpdateInput edits a card. APIKey nil keeps the stored key (write-only).
@@ -81,15 +85,21 @@ type UpdateInput struct {
 
 // AddModelInput binds one model row to a card.
 type AddModelInput struct {
-	Model         string `json:"model"`
-	Name          string `json:"name"`
-	ContextLength int    `json:"context_length"`
+	Model         string  `json:"model"`
+	Name          string  `json:"name"`
+	ContextLength int     `json:"context_length"`
+	MaxTokens     int     `json:"max_tokens"`
+	InputPrice    float64 `json:"input_price"`
+	OutputPrice   float64 `json:"output_price"`
 }
 
 // UpdateModelInput edits one bound model row's display fields.
 type UpdateModelInput struct {
-	Name          *string `json:"name"`
-	ContextLength *int    `json:"context_length"`
+	Name          *string  `json:"name"`
+	ContextLength *int     `json:"context_length"`
+	MaxTokens     *int     `json:"max_tokens"`
+	InputPrice    *float64 `json:"input_price"`
+	OutputPrice   *float64 `json:"output_price"`
 }
 
 // ProbeInput asks an endpoint for its model list using what the FORM
@@ -444,6 +454,9 @@ func (s *Service) AddModel(tenantID, ownerID, id, kind string, in AddModelInput)
 	if strings.TrimSpace(in.Model) == "" {
 		return ModelRef{}, errs.BadRequest("model is required")
 	}
+	if err := validateModelCaps(in.MaxTokens, in.InputPrice, in.OutputPrice); err != nil {
+		return ModelRef{}, err
+	}
 	store, err := s.storeForKind(kind)
 	if err != nil {
 		return ModelRef{}, err
@@ -465,6 +478,9 @@ func (s *Service) AddModel(tenantID, ownerID, id, kind string, in AddModelInput)
 		Model:         in.Model,
 		Name:          in.Name,
 		ContextLength: in.ContextLength,
+		MaxTokens:     in.MaxTokens,
+		InputPrice:    in.InputPrice,
+		OutputPrice:   in.OutputPrice,
 	})
 	if err != nil {
 		return ModelRef{}, errs.Wrap(errs.CodeBadRequest, "add provider model", err)
@@ -493,7 +509,7 @@ func (s *Service) RemoveModel(tenantID, id, modelID, kind string) error {
 	return errs.NotFound("model not found under provider")
 }
 
-// UpdateModel edits one bound model row's display name / context length.
+// UpdateModel edits one bound model row's display name / capacities.
 func (s *Service) UpdateModel(tenantID, id, modelID, kind string, in UpdateModelInput) (ModelRef, error) {
 	store, err := s.storeForKind(kind)
 	if err != nil {
@@ -513,12 +529,38 @@ func (s *Service) UpdateModel(tenantID, id, modelID, kind string, in UpdateModel
 		if in.ContextLength != nil {
 			m.ContextLength = *in.ContextLength
 		}
+		mt, ip, op := m.MaxTokens, m.InputPrice, m.OutputPrice
+		if in.MaxTokens != nil {
+			mt = *in.MaxTokens
+		}
+		if in.InputPrice != nil {
+			ip = *in.InputPrice
+		}
+		if in.OutputPrice != nil {
+			op = *in.OutputPrice
+		}
+		if err := validateModelCaps(mt, ip, op); err != nil {
+			return ModelRef{}, err
+		}
+		m.MaxTokens, m.InputPrice, m.OutputPrice = mt, ip, op
 		if err := store.UpdateModel(tenantID, m); err != nil {
 			return ModelRef{}, errs.Wrap(errs.CodeInternal, "update provider model", err)
 		}
 		return m, nil
 	}
 	return ModelRef{}, errs.NotFound("model not found under provider")
+}
+
+// validateModelCaps rejects negative capacities. Zero prices are valid
+// (unconfigured cost); zero max tokens means "use the provider default".
+func validateModelCaps(maxTokens int, inputPrice, outputPrice float64) error {
+	if maxTokens < 0 {
+		return errs.BadRequest("max_tokens must be >= 0")
+	}
+	if inputPrice < 0 || outputPrice < 0 {
+		return errs.BadRequest("prices must be >= 0")
+	}
+	return nil
 }
 
 // Probe lists the models an arbitrary endpoint advertises, using form-state

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { Plus, RefreshCw, Star, Trash2, Zap } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, RefreshCw, Star, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,13 +18,17 @@ import { useConfirm } from "@/components/ui/confirm";
 export type ProviderKind = "llm" | "embedding" | "rerank";
 
 // One editable model row. rowId is set for rows already stored server-side;
-// freshly added rows carry only a local key until Apply.
+// freshly added rows carry only a local key until Apply. max_tokens/prices
+// are chat-specific and stay undefined for embedding/rerank rows.
 interface DraftModel {
   key: string;
   rowId?: string;
   model: string;
   name: string;
   context_length?: number;
+  max_tokens?: number;
+  input_price?: number;
+  output_price?: number;
   is_default?: boolean;
 }
 
@@ -58,6 +62,22 @@ function modelsForKind(card: ProviderCard, kind: ProviderKind): ProviderModelRef
   if (kind === "llm") return card.chat_models ?? [];
   if (kind === "embedding") return card.embed_models ?? [];
   return card.rerank_models ?? [];
+}
+
+// A stored row into an editable draft; 0-valued capacities normalize to
+// undefined so an untouched row diffs clean against the server's omitted 0s.
+function draftFromRef(m: ProviderModelRef): DraftModel {
+  return {
+    key: m.id,
+    rowId: m.id,
+    model: m.model,
+    name: m.name,
+    context_length: m.context_length || undefined,
+    max_tokens: m.max_tokens || undefined,
+    input_price: m.input_price || undefined,
+    output_price: m.output_price || undefined,
+    is_default: m.is_default,
+  };
 }
 
 function kindLabel(t: (k: string) => string, kind: ProviderKind): string {
@@ -357,34 +377,13 @@ function ProviderEditor({
   const [apiKey, setApiKey] = useState("");
   const [endpoint, setEndpoint] = useState(card.endpoint);
   const [chatModels, setChatModels] = useState<DraftModel[]>(() =>
-    (card.chat_models ?? []).map((m) => ({
-      key: m.id,
-      rowId: m.id,
-      model: m.model,
-      name: m.name,
-      context_length: m.context_length,
-      is_default: m.is_default,
-    }))
+    (card.chat_models ?? []).map(draftFromRef)
   );
   const [embedModels, setEmbedModels] = useState<DraftModel[]>(() =>
-    (card.embed_models ?? []).map((m) => ({
-      key: m.id,
-      rowId: m.id,
-      model: m.model,
-      name: m.name,
-      context_length: m.context_length,
-      is_default: m.is_default,
-    }))
+    (card.embed_models ?? []).map(draftFromRef)
   );
   const [rerankModels, setRerankModels] = useState<DraftModel[]>(() =>
-    (card.rerank_models ?? []).map((m) => ({
-      key: m.id,
-      rowId: m.id,
-      model: m.model,
-      name: m.name,
-      context_length: m.context_length,
-      is_default: m.is_default,
-    }))
+    (card.rerank_models ?? []).map(draftFromRef)
   );
   const [busy, setBusy] = useState(false);
 
@@ -439,10 +438,24 @@ function ProviderEditor({
           if (!m.model.trim()) continue;
           if (m.rowId) {
             const o = original.find((x) => x.id === m.rowId);
-            if (o && (o.name !== m.name || o.context_length !== m.context_length)) {
+            // Chat rows carry max_tokens and prices too; embedding/rerank
+            // rows only diff name/context_length.
+            const capsChanged =
+              kind === "llm" &&
+              ((o?.max_tokens ?? undefined) !== (m.max_tokens ?? undefined) ||
+                (o?.input_price ?? undefined) !== (m.input_price ?? undefined) ||
+                (o?.output_price ?? undefined) !== (m.output_price ?? undefined));
+            if (o && (o.name !== m.name || (o.context_length ?? undefined) !== (m.context_length ?? undefined) || capsChanged)) {
               await api.providers.updateModel(card.id, kind, m.rowId, {
                 name: m.name,
                 context_length: m.context_length,
+                ...(kind === "llm"
+                  ? {
+                      max_tokens: m.max_tokens,
+                      input_price: m.input_price,
+                      output_price: m.output_price,
+                    }
+                  : {}),
               });
             }
           } else {
@@ -450,6 +463,13 @@ function ProviderEditor({
               model: m.model,
               name: m.name,
               context_length: m.context_length,
+              ...(kind === "llm"
+                ? {
+                    max_tokens: m.max_tokens,
+                    input_price: m.input_price,
+                    output_price: m.output_price,
+                  }
+                : {}),
             });
           }
         }
@@ -726,7 +746,14 @@ function CustomProviderCard({
         ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
         chat_models: chatModels
           .filter((m) => m.model.trim())
-          .map((m) => ({ model: m.model, name: m.name, context_length: m.context_length })),
+          .map((m) => ({
+            model: m.model,
+            name: m.name,
+            context_length: m.context_length,
+            max_tokens: m.max_tokens,
+            input_price: m.input_price,
+            output_price: m.output_price,
+          })),
         embed_models: embedModels
           .filter((m) => m.model.trim())
           .map((m) => ({ model: m.model, name: m.name, context_length: m.context_length })),
@@ -839,12 +866,52 @@ function ModelListEditor({
   const [probing, setProbing] = useState(false);
   const [candidates, setCandidates] = useState<DiscoveredModel[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [ctxText, setCtxText] = useState<Record<string, string>>({});
+  // Rows whose capacity disclosure is open, keyed by draft key.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Raw per-field text while a capacity input is being typed, keyed by
+  // `${draftKey}:${field}`; removed on blur so the canonical value shows.
+  const [textBuf, setTextBuf] = useState<Record<string, string>>({});
   // Tracks which row is running an unsaved-model connectivity test.
   const [localTesting, setLocalTesting] = useState<string | null>(null);
 
   function patch(key: string, next: Partial<DraftModel>) {
     onChange(models.map((m) => (m.key === key ? { ...m, ...next } : m)));
+  }
+
+  function toggleExpanded(key: string) {
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }
+
+  type CapacityField = "context_length" | "max_tokens" | "input_price" | "output_price";
+
+  function fieldText(m: DraftModel, field: CapacityField): string {
+    const buf = textBuf[`${m.key}:${field}`];
+    if (buf !== undefined) return buf;
+    if (field === "context_length") return formatCapacity(m.context_length);
+    const v = m[field];
+    return v === undefined || v === null || v === 0 ? "" : String(v);
+  }
+
+  function setField(m: DraftModel, field: CapacityField, raw: string) {
+    setTextBuf((cur) => ({ ...cur, [`${m.key}:${field}`]: raw }));
+    if (field === "context_length" || field === "max_tokens") {
+      patch(m.key, { [field]: parseCapacity(raw) } as Partial<DraftModel>);
+    } else {
+      const n = raw.trim() === "" ? undefined : Number(raw);
+      patch(m.key, { [field]: n !== undefined && Number.isFinite(n) ? n : undefined } as Partial<DraftModel>);
+    }
+  }
+
+  function settleField(m: DraftModel, field: CapacityField) {
+    setTextBuf((cur) => {
+      const next = { ...cur };
+      delete next[`${m.key}:${field}`];
+      return next;
+    });
   }
 
   // Saved rows test via the stored model id (onTest); fresh rows fire a
@@ -941,76 +1008,146 @@ function ModelListEditor({
         <p className="text-xs text-muted-foreground">{t("settings.provider_models_empty")}</p>
       )}
 
-      {models.map((m) => (
-        <div key={m.key} className="flex items-center gap-2">
-          {m.rowId ? (
-            <span className="h-9 min-w-0 flex-1 truncate rounded-md border border-input bg-muted/40 px-3 pt-2 font-mono text-xs leading-5">
-              {m.model}
-            </span>
-          ) : (
-            <Input
-              className="min-w-0 flex-1 font-mono text-xs"
-              placeholder={t("settings.provider_model_id")}
-              value={m.model}
-              disabled={disabled}
-              onChange={(e) => patch(m.key, { model: e.target.value })}
-            />
-          )}
-          <Input
-            className="min-w-0 flex-1 text-xs"
-            placeholder={t("settings.provider_model_name")}
-            value={m.name}
-            disabled={disabled}
-            onChange={(e) => patch(m.key, { name: e.target.value })}
-          />
-          <Input
-            className="w-24 shrink-0 text-xs"
-            placeholder="128K"
-            value={ctxText[m.key] ?? formatCapacity(m.context_length)}
-            disabled={disabled}
-            onChange={(e) => {
-              setCtxText({ ...ctxText, [m.key]: e.target.value });
-              patch(m.key, { context_length: parseCapacity(e.target.value) });
-            }}
-          />
-          {m.rowId && onMakeDefault && (
-            <button
-              type="button"
-              className="shrink-0 text-muted-foreground hover:text-primary disabled:opacity-50"
-              title={m.is_default ? t("settings.unset_default") : t("settings.set_default")}
-              disabled={disabled}
-              onClick={() => onMakeDefault(m.rowId!, !!m.is_default)}
-            >
-              <Star className={cn("h-3.5 w-3.5", m.is_default && "fill-primary text-primary")} />
-            </button>
-          )}
-          {(m.rowId ? onTest : true) && (
-            <button
-              type="button"
-              className="shrink-0 text-muted-foreground hover:text-primary disabled:opacity-50"
-              title={t("settings.test")}
-              disabled={disabled || testing === m.rowId || localTesting === m.key}
-              onClick={() => testRow(m)}
-            >
-              <Zap
-                className={cn(
-                  "h-3.5 w-3.5",
-                  (testing === m.rowId || localTesting === m.key) && "animate-pulse"
-                )}
+      {models.map((m) => {
+        const open = expanded.has(m.key);
+        const ctxBadge =
+          m.context_length && m.context_length > 0
+            ? `${formatCapacity(m.context_length)} ctx`
+            : "";
+        return (
+          <div key={m.key} className="rounded-md border border-input px-2 py-1.5">
+            <div className="flex items-center gap-2">
+              {m.rowId ? (
+                <span className="h-9 min-w-0 flex-1 truncate rounded-md border border-input bg-muted/40 px-3 pt-2 font-mono text-xs leading-5">
+                  {m.model}
+                </span>
+              ) : (
+                <Input
+                  className="min-w-0 flex-1 font-mono text-xs"
+                  placeholder={t("settings.provider_model_id")}
+                  value={m.model}
+                  disabled={disabled}
+                  onChange={(e) => patch(m.key, { model: e.target.value })}
+                />
+              )}
+              <Input
+                className="min-w-0 flex-1 text-xs"
+                placeholder={t("settings.provider_model_name")}
+                value={m.name}
+                disabled={disabled}
+                onChange={(e) => patch(m.key, { name: e.target.value })}
               />
-            </button>
-          )}
-          <button
-            type="button"
-            className="shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-50"
-            title={t("common.delete")}
-            disabled={disabled}
-            onClick={() => onChange(models.filter((x) => x.key !== m.key))}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      ))}
+              {!!ctxBadge && (
+                <span
+                  title={t("settings.model_context_window")}
+                  className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                >
+                  {ctxBadge}
+                </span>
+              )}
+              <button
+                type="button"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                aria-label={t("settings.model_capacity")}
+                aria-expanded={open}
+                title={t("settings.model_capacity")}
+                disabled={disabled}
+                onClick={() => toggleExpanded(m.key)}
+              >
+                {open ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+              </button>
+              {m.rowId && onMakeDefault && (
+                <button
+                  type="button"
+                  className="shrink-0 text-muted-foreground hover:text-primary disabled:opacity-50"
+                  title={m.is_default ? t("settings.unset_default") : t("settings.set_default")}
+                  disabled={disabled}
+                  onClick={() => onMakeDefault(m.rowId!, !!m.is_default)}
+                >
+                  <Star className={cn("h-3.5 w-3.5", m.is_default && "fill-primary text-primary")} />
+                </button>
+              )}
+              {(m.rowId ? onTest : true) && (
+                <button
+                  type="button"
+                  className="shrink-0 text-muted-foreground hover:text-primary disabled:opacity-50"
+                  title={t("settings.test")}
+                  disabled={disabled || testing === m.rowId || localTesting === m.key}
+                  onClick={() => testRow(m)}
+                >
+                  <Zap
+                    className={cn(
+                      "h-3.5 w-3.5",
+                      (testing === m.rowId || localTesting === m.key) && "animate-pulse"
+                    )}
+                  />
+                </button>
+              )}
+              <button
+                type="button"
+                className="shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-50"
+                title={t("common.delete")}
+                disabled={disabled}
+                onClick={() => onChange(models.filter((x) => x.key !== m.key))}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {open && (
+              <div className="mt-2 grid grid-cols-2 gap-2 border-t pt-2 sm:grid-cols-4">
+                <CapacityField
+                  m={m}
+                  field="context_length"
+                  fieldText={fieldText}
+                  setField={setField}
+                  settleField={settleField}
+                  placeholder="128K"
+                  disabled={disabled}
+                  t={t}
+                />
+                {kind === "llm" && (
+                  <>
+                    <CapacityField
+                      m={m}
+                      field="max_tokens"
+                      fieldText={fieldText}
+                      setField={setField}
+                      settleField={settleField}
+                      placeholder="2048"
+                      disabled={disabled}
+                      t={t}
+                    />
+                    <CapacityField
+                      m={m}
+                      field="input_price"
+                      fieldText={fieldText}
+                      setField={setField}
+                      settleField={settleField}
+                      placeholder="0"
+                      disabled={disabled}
+                      t={t}
+                    />
+                    <CapacityField
+                      m={m}
+                      field="output_price"
+                      fieldText={fieldText}
+                      setField={setField}
+                      settleField={settleField}
+                      placeholder="0"
+                      disabled={disabled}
+                      t={t}
+                    />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
 
       <Button
         variant="ghost"
@@ -1078,5 +1215,51 @@ function ModelListEditor({
         </Dialog>
       )}
     </div>
+  );
+}
+
+type CapacityFieldKey = "context_length" | "max_tokens" | "input_price" | "output_price";
+
+function capacityLabel(field: CapacityFieldKey, t: ReturnType<typeof useTranslations>): string {
+  if (field === "context_length") return t("settings.model_context_window");
+  if (field === "max_tokens") return t("settings.model_max_tokens");
+  if (field === "input_price") return t("settings.model_input_price");
+  return t("settings.model_output_price");
+}
+
+// One capacity field inside a row's disclosure: a small labeled input that
+// edits K/M-suffixed text and settles back to the canonical value on blur.
+function CapacityField({
+  m,
+  field,
+  fieldText,
+  setField,
+  settleField,
+  placeholder,
+  disabled,
+  t,
+}: {
+  m: DraftModel;
+  field: CapacityFieldKey;
+  fieldText: (m: DraftModel, field: CapacityFieldKey) => string;
+  setField: (m: DraftModel, field: CapacityFieldKey, raw: string) => void;
+  settleField: (m: DraftModel, field: CapacityFieldKey) => void;
+  placeholder: string;
+  disabled?: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <label className="space-y-1">
+      <span className="text-[11px] text-muted-foreground">{capacityLabel(field, t)}</span>
+      <Input
+        className="h-8 text-xs"
+        inputMode="numeric"
+        placeholder={placeholder}
+        value={fieldText(m, field)}
+        disabled={disabled}
+        onChange={(e) => setField(m, field, e.target.value)}
+        onBlur={() => settleField(m, field)}
+      />
+    </label>
   );
 }

@@ -205,12 +205,16 @@ export interface CatalogProvider {
   rerank_models: { id: string; context_length?: number; note?: string }[];
 }
 
-// One model row bound to a provider card.
+// One model row bound to a provider card. max_tokens/prices are
+// chat-specific; embedding/rerank rows report them 0/omitted.
 export interface ProviderModelRef {
   id: string;
   name: string;
   model: string;
   context_length?: number;
+  max_tokens?: number;
+  input_price?: number;
+  output_price?: number;
   is_default: boolean;
   last_test_status: string;
 }
@@ -1012,7 +1016,14 @@ export const api = {
       name?: string;
       endpoint?: string;
       api_key?: string;
-      chat_models?: { model: string; name?: string; context_length?: number }[];
+      chat_models?: {
+        model: string;
+        name?: string;
+        context_length?: number;
+        max_tokens?: number;
+        input_price?: number;
+        output_price?: number;
+      }[];
       embed_models?: { model: string; name?: string; context_length?: number }[];
       rerank_models?: { model: string; name?: string; context_length?: number }[];
     }): Promise<ProviderCard> {
@@ -1062,7 +1073,14 @@ export const api = {
     async addModel(
       id: string,
       kind: "llm" | "embedding" | "rerank",
-      body: { model: string; name?: string; context_length?: number }
+      body: {
+        model: string;
+        name?: string;
+        context_length?: number;
+        max_tokens?: number;
+        input_price?: number;
+        output_price?: number;
+      }
     ): Promise<ProviderModelRef> {
       return request(`/providers/${id}/models/${kind}`, {
         method: "POST",
@@ -1073,7 +1091,13 @@ export const api = {
       id: string,
       kind: "llm" | "embedding" | "rerank",
       mid: string,
-      body: { name?: string; context_length?: number }
+      body: {
+        name?: string;
+        context_length?: number;
+        max_tokens?: number;
+        input_price?: number;
+        output_price?: number;
+      }
     ): Promise<ProviderModelRef> {
       return request(`/providers/${id}/models/${kind}/${mid}`, {
         method: "PUT",

@@ -10,13 +10,17 @@ import (
 )
 
 // ModelRef is the provider-agnostic view of one model row bound to a card.
+// MaxTokens/prices are chat-specific; embedding/rerank rows report them 0.
 type ModelRef struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Model          string `json:"model"`
-	ContextLength  int    `json:"context_length,omitempty"`
-	IsDefault      bool   `json:"is_default"`
-	LastTestStatus string `json:"last_test_status"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Model          string  `json:"model"`
+	ContextLength  int     `json:"context_length,omitempty"`
+	MaxTokens      int     `json:"max_tokens,omitempty"`
+	InputPrice     float64 `json:"input_price,omitempty"`
+	OutputPrice    float64 `json:"output_price,omitempty"`
+	IsDefault      bool    `json:"is_default"`
+	LastTestStatus string  `json:"last_test_status"`
 }
 
 // KindStore abstracts the per-kind model table so one service serves
@@ -45,6 +49,10 @@ func (s *LLMStore) CreateModel(tenantID, ownerID, providerID string, pv *Provide
 	if name == "" {
 		name = in.Model
 	}
+	maxTokens := in.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 2048
+	}
 	p := &llm.LLMModel{
 		ID:            NewID(),
 		TenantID:      tenantID,
@@ -54,7 +62,10 @@ func (s *LLMStore) CreateModel(tenantID, ownerID, providerID string, pv *Provide
 		Endpoint:      pv.Endpoint,
 		APIKey:        pv.APIKey,
 		Model:         in.Model,
+		MaxTokens:     maxTokens,
 		ContextLength: in.ContextLength,
+		InputPrice:    in.InputPrice,
+		OutputPrice:   in.OutputPrice,
 		OwnerID:       ownerID,
 		Status:        llm.StatusActive,
 		IsDefault:     isDefault,
@@ -62,7 +73,7 @@ func (s *LLMStore) CreateModel(tenantID, ownerID, providerID string, pv *Provide
 	if err := s.repo.Create(p); err != nil {
 		return ModelRef{}, err
 	}
-	return ModelRef{ID: p.ID, Name: p.Name, Model: p.Model, ContextLength: p.ContextLength, IsDefault: isDefault}, nil
+	return ModelRef{ID: p.ID, Name: p.Name, Model: p.Model, ContextLength: p.ContextLength, MaxTokens: p.MaxTokens, InputPrice: p.InputPrice, OutputPrice: p.OutputPrice, IsDefault: isDefault}, nil
 }
 
 func (s *LLMStore) ListModels(tenantID, providerID string) ([]ModelRef, error) {
@@ -72,7 +83,7 @@ func (s *LLMStore) ListModels(tenantID, providerID string) ([]ModelRef, error) {
 	}
 	refs := make([]ModelRef, 0, len(items))
 	for _, p := range items {
-		refs = append(refs, ModelRef{ID: p.ID, Name: p.Name, Model: p.Model, ContextLength: p.ContextLength, IsDefault: p.IsDefault, LastTestStatus: p.LastTestStatus})
+		refs = append(refs, ModelRef{ID: p.ID, Name: p.Name, Model: p.Model, ContextLength: p.ContextLength, MaxTokens: p.MaxTokens, InputPrice: p.InputPrice, OutputPrice: p.OutputPrice, IsDefault: p.IsDefault, LastTestStatus: p.LastTestStatus})
 	}
 	return refs, nil
 }
@@ -87,6 +98,11 @@ func (s *LLMStore) UpdateModel(tenantID string, m ModelRef) error {
 	}
 	p.Name = m.Name
 	p.ContextLength = m.ContextLength
+	if m.MaxTokens > 0 {
+		p.MaxTokens = m.MaxTokens
+	}
+	p.InputPrice = m.InputPrice
+	p.OutputPrice = m.OutputPrice
 	return s.repo.Update(p)
 }
 func (s *LLMStore) UpdateCreds(tenantID, providerID, endpoint, apiKey string) error {
