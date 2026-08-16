@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import useSWR from "swr";
 import {
   FileText,
@@ -19,8 +20,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { api, AnalyticsOverview, AnalyticsDocStats, KBUsage, ActivityItem, FeedbackItem } from "@/lib/api";
 import { useTranslations } from "next-intl";
-import { formatSize, formatTime } from "@/lib/utils";
+import { formatSize, formatTime, cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import { BillsSection } from "./bills-section";
+
+type Tab = "overview" | "bills";
+
+function initialTab(): Tab {
+  if (typeof window === "undefined") return "overview";
+  return new URLSearchParams(window.location.search).get("tab") === "bills" ? "bills" : "overview";
+}
 
 // Color tokens for icon badges. Tailwind requires static class names, so we
 // enumerate the variants used across the dashboard.
@@ -77,19 +86,64 @@ function StatusPill({ status }: { status: string }) {
 export default function AnalyticsPage() {
   const t = useTranslations();
   const router = useRouter();
+  const [tab, setTab] = useState<Tab>(initialTab);
   const { data: overview } = useSWR<AnalyticsOverview>("analytics-overview", () => api.analyticsOverview());
   const { data: docStats } = useSWR<AnalyticsDocStats>("analytics-docs", () => api.analyticsDocStats());
   const { data: usage } = useSWR<{ items: KBUsage[] }>("analytics-usage", () => api.analyticsUsage());
   const { data: activity } = useSWR<{ items: ActivityItem[] }>("analytics-activity", () => api.analyticsActivity(20));
   const { data: feedback } = useSWR<{ items: FeedbackItem[] }>("analytics-feedback", () => api.analyticsFeedback(50));
 
+  function switchTab(next: Tab) {
+    setTab(next);
+    // Keep the tab deep-linkable and refresh-safe.
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", next === "bills" ? "?tab=bills" : window.location.pathname);
+    }
+  }
+
+  // Sync the tab with the URL after mount: a client-side redirect from the
+  // old /dashboard/bills route can mount this page before the history entry
+  // is updated, so the initializer may read a stale query string.
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    if (fromUrl === "bills") setTab("bills");
+    else if (fromUrl === null && tab === "bills") setTab("overview");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Browser back/forward switches tabs too.
+  useEffect(() => {
+    const onPop = () => {
+      setTab(new URLSearchParams(window.location.search).get("tab") === "bills" ? "bills" : "overview");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   return (
     <div className="space-y-6">
-      <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("analytics.title")}</h1>
-        <p className="text-sm text-muted-foreground mt-1">{t("analytics.overview")}</p>
+        <div className="flex w-fit gap-1 rounded-md border p-0.5">
+          {(["overview", "bills"] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => switchTab(k)}
+              className={cn(
+                "rounded px-3 py-1 text-sm transition-colors",
+                tab === k ? "bg-primary text-primary-foreground" : "hover:bg-accent"
+              )}
+            >
+              {t(k === "overview" ? "analytics.overview" : "nav.usage")}
+            </button>
+          ))}
+        </div>
       </div>
 
+      {tab === "bills" ? (
+        <BillsSection />
+      ) : (
+        <>
       {/* Overview cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard icon={BookOpen} color="blue" label={t("analytics.knowledge_bases")} value={overview?.knowledge_bases} loading={!overview} />
@@ -280,6 +334,8 @@ export default function AnalyticsPage() {
           )}
         </CardContent>
       </Card>
+        </>
+      )}
     </div>
   );
 }

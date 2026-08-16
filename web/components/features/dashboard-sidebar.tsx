@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, BarChart3, Coins, Cpu, ExternalLink, Key, LayoutDashboard, LogOut, ScrollText, Settings, ShieldAlert, User, UserCog, Users, X } from "lucide-react";
+import { BookOpen, BarChart3, Cpu, ExternalLink, Key, LayoutDashboard, LogOut, ScrollText, Settings, ShieldAlert, User, UserCog, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useTranslations } from "next-intl";
@@ -90,10 +90,9 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
             labelKey: "nav.group_admin",
             items: [
               { href: "/dashboard/tenant", labelKey: "nav.my_tenant", icon: Users, color: "indigo" },
-              // Team-level analytics and usage & cost live with the admin
-              // tools; members see their personal usage in the chat dialog.
+              // Analytics hosts both the overview and the usage & cost tab
+              // (the standalone bills page redirects here).
               { href: "/dashboard/analytics", labelKey: "nav.analytics", icon: BarChart3, color: "purple" },
-              { href: "/dashboard/bills", labelKey: "nav.usage", icon: Coins, color: "amber" },
               { href: "/dashboard/audit", labelKey: "nav.audit", icon: ScrollText, color: "amber" },
             ],
           },
