@@ -88,7 +88,7 @@ export default function KnowledgeBaseLayout({
         {kb?.name || t("kb.loading")}
       </h1>
       <div className="flex items-end gap-1 border-b mt-3 mb-6">
-        <div className="flex gap-1 overflow-x-auto">
+        <div className="flex gap-1 overflow-x-auto overflow-y-hidden pb-px">
           {TABS.map((tab) => {
             const href = tab.suffix === "" ? base : base + tab.suffix;
             const active = tab.exact ? pathname === base : pathname === href || pathname?.startsWith(href + "/");
