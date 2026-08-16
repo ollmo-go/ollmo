@@ -12,14 +12,21 @@ import { useConfirm } from "@/components/ui/confirm";
 import { decodeToken, getToken } from "@/lib/auth";
 import { Logo } from "@/components/brand/logo";
 
-type NavChild = { href: string; labelKey: string; icon: typeof Key; color?: string };
 type NavItem = {
   href: string;
   labelKey: string;
   icon: typeof Key;
   color?: string;
-  children?: NavChild[];
   exact?: boolean;
+};
+
+// NavGroup is one labeled section of the sidebar. The first group has no
+// label (the dashboard home sits on top); the system group gets the amber
+// super-admin styling instead of the muted section header.
+type NavGroup = {
+  labelKey?: string;
+  system?: boolean;
+  items: NavItem[];
 };
 
 // Icon colors keyed by token. Tailwind needs static class names.
@@ -53,21 +60,50 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
     }
   }, []);
 
-  // Backend management nav ordered by usage frequency:
-  // Dashboard → KB → Analytics → Models → API Keys → Team → Audit.
-  // Chat is in the frontend product (/>), not in the dashboard.
-  const nav: NavItem[] = [
-    { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, color: "blue", exact: true },
-    { href: "/dashboard/knowledge-bases", labelKey: "nav.knowledge_bases", icon: BookOpen, color: "green" },
-    { href: "/dashboard/analytics", labelKey: "nav.analytics", icon: BarChart3, color: "purple" },
-    { href: "/dashboard/bills", labelKey: "nav.usage", icon: Coins, color: "amber" },
-    { href: "/dashboard/settings/models", labelKey: "nav.settings_models", icon: Cpu, color: "orange" },
-    { href: "/dashboard/settings/api-keys", labelKey: "nav.api_keys", icon: Key, color: "cyan" },
+  // Backend management nav grouped by semantics:
+  // home → workspace (KB/Analytics/Usage) → settings (models/API keys)
+  // → admin (team/audit) → system admin (super admin only, amber).
+  // Chat is in the frontend product (/), not in the dashboard.
+  const groups: NavGroup[] = [
+    {
+      items: [
+        { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, color: "blue", exact: true },
+      ],
+    },
+    {
+      labelKey: "nav.group_workspace",
+      items: [
+        { href: "/dashboard/knowledge-bases", labelKey: "nav.knowledge_bases", icon: BookOpen, color: "green" },
+        { href: "/dashboard/analytics", labelKey: "nav.analytics", icon: BarChart3, color: "purple" },
+        { href: "/dashboard/bills", labelKey: "nav.usage", icon: Coins, color: "amber" },
+      ],
+    },
+    {
+      labelKey: "nav.group_config",
+      items: [
+        { href: "/dashboard/settings/models", labelKey: "nav.models", icon: Cpu, color: "orange" },
+        { href: "/dashboard/settings/api-keys", labelKey: "nav.api_keys", icon: Key, color: "cyan" },
+      ],
+    },
     ...(isAdmin
-      ? [{ href: "/dashboard/tenant", labelKey: "nav.my_tenant", icon: Users, color: "indigo" } as NavItem]
+      ? [{
+          labelKey: "nav.group_admin",
+          items: [
+            { href: "/dashboard/tenant", labelKey: "nav.my_tenant", icon: Users, color: "indigo" },
+            { href: "/dashboard/audit", labelKey: "nav.audit", icon: ScrollText, color: "amber" },
+          ],
+        } as NavGroup]
       : []),
-    ...(isAdmin
-      ? [{ href: "/dashboard/audit", labelKey: "nav.audit", icon: ScrollText, color: "amber" } as NavItem]
+    ...(isSuperAdmin
+      ? [{
+          labelKey: "nav.system_admin",
+          system: true,
+          items: [
+            { href: "/dashboard/system-settings", labelKey: "nav.system_settings", icon: Settings },
+            { href: "/dashboard/system-tenants", labelKey: "nav.tenants", icon: Users },
+            { href: "/dashboard/system-users", labelKey: "nav.system_users", icon: UserCog },
+          ],
+        } as NavGroup]
       : []),
   ];
 
@@ -83,10 +119,12 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
   }
 
   return (
-    <aside className="w-64 border-r bg-muted/30 p-4 flex flex-col sticky top-0 h-screen overflow-y-auto">
-      <div className="mb-6 px-2 flex items-center justify-between">
+    <aside className="w-64 border-r bg-muted/30 p-4 flex flex-col sticky top-0 h-screen">
+      <div className="mb-4 px-2 flex items-center justify-between">
+        {/* The logo leads back to the product (chat) home; the dashboard
+            itself is reachable through the "dashboard" nav item above. */}
         <Link
-          href="/dashboard"
+          href="/"
           className="hover:opacity-80 transition-opacity"
           onClick={onNavigate}
         >
@@ -102,101 +140,57 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
           </button>
         )}
       </div>
-      <nav className="space-y-1 flex-1">
-        {nav.map((item) => {
-          const Icon = item.icon;
-          const active = item.exact
-            ? pathname === item.href
-            : pathname === item.href || pathname?.startsWith(item.href + "/");
-          const showChildren =
-            !!item.children && (active || pathname?.startsWith(item.href + "/"));
-          return (
-            <div key={item.href} className="space-y-1">
-              <Link
-                href={item.href}
-                onClick={onNavigate}
+      <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto">
+        {groups.map((group, gi) => (
+          <div
+            key={gi}
+            className={cn(
+              "space-y-1",
+              gi > 0 && "pt-2",
+              group.system &&
+                "mt-1 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 p-2"
+            )}
+          >
+            {group.labelKey && (
+              <p
                 className={cn(
-                  "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
-                  active
-                    ? "bg-accent text-primary font-medium"
-                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  "px-2 pb-1 text-xs font-semibold",
+                  group.system
+                    ? "flex items-center gap-1.5 text-amber-700 dark:text-amber-400"
+                    : "uppercase tracking-wide text-muted-foreground"
                 )}
               >
-                <Icon className={cn("h-4 w-4 shrink-0", active ? "text-primary" : ICON_COLOR[item.color ?? "blue"])} />
-                {t(item.labelKey)}
-              </Link>
-              {showChildren &&
-                item.children!.map((child) => {
-                  const ChildIcon = child.icon;
-                  const childActive = pathname === child.href;
-                  return (
-                    <Link
-                      key={child.href}
-                      href={child.href}
-                      onClick={onNavigate}
-                      className={cn(
-                        "flex items-center gap-2 rounded-md py-1.5 pl-9 pr-3 text-sm",
-                        childActive
-                          ? "bg-accent text-primary font-medium"
-                          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                      )}
-                    >
-                      <ChildIcon className={cn("h-3.5 w-3.5 shrink-0", childActive ? "text-primary" : ICON_COLOR[child.color ?? "blue"])} />
-                      {t(child.labelKey)}
-                    </Link>
-                  );
-                })}
-            </div>
-          );
-        })}
+                {group.system && <ShieldAlert className="h-3.5 w-3.5" />}
+                {t(group.labelKey)}
+              </p>
+            )}
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              const active = item.exact
+                ? pathname === item.href
+                : pathname === item.href || pathname?.startsWith(item.href + "/");
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm",
+                    active
+                      ? "bg-accent text-primary font-medium"
+                      : group.system
+                        ? "text-amber-700 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-900/30"
+                        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  )}
+                >
+                  <Icon className={cn("h-4 w-4 shrink-0", active ? "text-primary" : ICON_COLOR[item.color ?? "blue"])} />
+                  {t(item.labelKey)}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
-      {isSuperAdmin && (
-        <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 p-2 space-y-1">
-          <p className="flex items-center gap-1.5 px-2 py-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
-            <ShieldAlert className="h-3.5 w-3.5" />
-            {t("nav.system_admin")}
-          </p>
-          <Link
-            href="/dashboard/system-settings"
-            onClick={onNavigate}
-            className={cn(
-              "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
-              pathname?.startsWith("/dashboard/system-settings")
-                ? "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 font-medium"
-                : "text-amber-700 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-900/30"
-            )}
-          >
-            <Settings className="h-4 w-4" />
-            {t("nav.system_settings")}
-          </Link>
-          <Link
-            href="/dashboard/system-tenants"
-            onClick={onNavigate}
-            className={cn(
-              "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
-              pathname?.startsWith("/dashboard/system-tenants")
-                ? "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 font-medium"
-                : "text-amber-700 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-900/30"
-            )}
-          >
-            <Users className="h-4 w-4" />
-            {t("nav.tenants")}
-          </Link>
-          <Link
-            href="/dashboard/system-users"
-            onClick={onNavigate}
-            className={cn(
-              "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
-              pathname?.startsWith("/dashboard/system-users")
-                ? "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 font-medium"
-                : "text-amber-700 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-900/30"
-            )}
-          >
-            <UserCog className="h-4 w-4" />
-            {t("nav.system_users")}
-          </Link>
-        </div>
-      )}
       <div className="space-y-1 pt-2 border-t">
         {profile?.tenant_name && (
           <p className="px-3 pb-1 text-xs text-muted-foreground truncate">
@@ -206,7 +200,7 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
         <Link
           href="/"
           onClick={onNavigate}
-          className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
         >
           <ExternalLink className="h-4 w-4 shrink-0 text-cyan-500 dark:text-cyan-400" />
           <span className="truncate">{t("nav.back_to_chat")}</span>
@@ -215,7 +209,7 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
           href="/dashboard/profile"
           onClick={onNavigate}
           className={cn(
-            "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
+            "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm",
             pathname?.startsWith("/dashboard/profile")
               ? "bg-accent text-primary font-medium"
               : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
@@ -227,7 +221,7 @@ export function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
         <button
           onClick={handleLogout}
           disabled={loggingOut}
-          className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 disabled:opacity-50 w-full"
+          className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 disabled:opacity-50 w-full"
         >
           <LogOut className="h-4 w-4" />
           {loggingOut ? t("nav.signing_out") : t("nav.sign_out")}

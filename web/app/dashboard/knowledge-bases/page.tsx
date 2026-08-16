@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Bot, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -184,13 +184,6 @@ export default function KnowledgeBasesPage() {
                 <p>chunk {kb.chunk_size}/{kb.chunk_overlap}</p>
               </CardContent>
             </Link>
-            <div className="px-4 pb-3">
-              <Button size="sm" variant="ghost" asChild>
-                <Link href={`/dashboard/knowledge-bases/${kb.id}/agent`}>
-                  <Bot className="h-3.5 w-3.5 mr-1" /> {t("kb.agent")}
-                </Link>
-              </Button>
-            </div>
           </Card>
         ))}
         {data && data.items.length === 0 && (

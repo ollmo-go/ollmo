@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import useSWR from "swr";
-import { ArrowLeft, Brain, Trash2 } from "lucide-react";
+import { Brain, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, Memory, Paginated } from "@/lib/api";
@@ -40,13 +39,6 @@ export default function MemoriesPage() {
 
   return (
     <div>
-      <Link
-        href={`/dashboard/knowledge-bases/${kbId}`}
-        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
-      >
-        <ArrowLeft className="h-4 w-4 mr-1" /> {t("kb.back_kb")}
-      </Link>
-
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{t("memory.title")}</h1>

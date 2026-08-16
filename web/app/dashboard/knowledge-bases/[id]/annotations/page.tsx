@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import useSWR from "swr";
-import { ArrowLeft, MessageSquareQuote, Pencil, Plus, Trash2, X } from "lucide-react";
+import { MessageSquareQuote, Pencil, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,13 +100,6 @@ export default function AnnotationsPage() {
 
   return (
     <div>
-      <Link
-        href={`/dashboard/knowledge-bases/${kbId}`}
-        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
-      >
-        <ArrowLeft className="h-4 w-4 mr-1" /> {t("kb.back")}
-      </Link>
-
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{t("annotation.title")}</h1>

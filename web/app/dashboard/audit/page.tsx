@@ -25,7 +25,7 @@ export default function AuditPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">{t("audit.title")}</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("audit.title")}</h1>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">

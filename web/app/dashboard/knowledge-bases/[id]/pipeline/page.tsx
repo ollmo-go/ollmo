@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -117,13 +116,6 @@ function PipelineCanvas() {
 
   return (
     <div>
-      <Link
-        href={`/dashboard/knowledge-bases/${kbId}`}
-        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
-      >
-        <ArrowLeft className="h-4 w-4 mr-1" /> {t("kb.back_kb")}
-      </Link>
-
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{t("pipeline.title")}</h1>

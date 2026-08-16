@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import useSWR from "swr";
 import ReactFlow, {
   Background,
@@ -14,7 +13,7 @@ import ReactFlow, {
   ReactFlowProvider,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { ArrowLeft, History, X } from "lucide-react";
+import { History, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, Execution, Paginated, TraceStep } from "@/lib/api";
@@ -87,13 +86,6 @@ function ExecutionsInner() {
 
   return (
     <div>
-      <Link
-        href={`/dashboard/knowledge-bases/${kbId}`}
-        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
-      >
-        <ArrowLeft className="h-4 w-4 mr-1" /> {t("kb.back")}
-      </Link>
-
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{t("exec.title")}</h1>

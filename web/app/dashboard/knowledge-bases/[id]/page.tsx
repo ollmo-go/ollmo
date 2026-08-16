@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
-import Link from "next/link";
-import { ArrowLeft, Brain, Check, ChevronDown, Download, FileText, Globe, History, MessageSquareQuote, MoreVertical, Pencil, RefreshCw, Search, Settings2, Tags, Trash2, Upload, BookMarked, X } from "lucide-react";
+import { Check, ChevronDown, Download, FileText, Globe, MoreVertical, Pencil, RefreshCw, Search, Tags, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -568,135 +567,25 @@ export default function KBDetailPage() {
 
   return (
     <div>
-      <Link
-        href="/dashboard/knowledge-bases"
-        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
-      >
-        <ArrowLeft className="h-4 w-4 mr-1" /> {t("kb.back")}
-      </Link>
-
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight truncate">{kb?.name || t("kb.loading")}</h1>
-          {kb && (
-            <p className="text-sm text-muted-foreground mt-1">
-              {embedNameById.get(kb.embedding_model_id) ?? kb.embedding_model_id} · chunk {kb.chunk_size}/{kb.chunk_overlap} · {kb.doc_count} {t("kb.docs")}
-            </p>
-          )}
-          {kb && (
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-xs text-muted-foreground">{t("kb.visibility")}:</span>
-              <div className="inline-flex rounded-md border overflow-hidden">
-                <button
-                  onClick={() => setVisibility("private")}
-                  className={cn(
-                    "px-2.5 py-1 text-xs transition-colors",
-                    kb.visibility === "private"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-background hover:bg-accent"
-                  )}
-                  title={t("kb.visibility_private_desc")}
-                >
-                  {t("kb.private")}
-                </button>
-                <button
-                  onClick={() => setVisibility("team")}
-                  className={cn(
-                    "px-2.5 py-1 text-xs transition-colors border-l",
-                    kb.visibility === "team"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-background hover:bg-accent"
-                  )}
-                  title={t("kb.visibility_team_desc")}
-                >
-                  {t("kb.team_shared")}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href={`/dashboard/knowledge-bases/${kbId}/pipeline`}>
-            <Button variant="outline">
-              <Settings2 className="h-4 w-4 mr-1" />
-              {t("kb.pipeline")}
-            </Button>
-          </Link>
-          <Link href={`/dashboard/knowledge-bases/${kbId}/agent`}>
-            <Button variant="outline">
-              <Brain className="h-4 w-4 mr-1" />
-              {t("kb.agent")}
-            </Button>
-          </Link>
-          <Link href={`/dashboard/knowledge-bases/${kbId}/executions`}>
-            <Button variant="outline">
-              <History className="h-4 w-4 mr-1" />
-              {t("exec.title")}
-            </Button>
-          </Link>
-          <Link href={`/dashboard/knowledge-bases/${kbId}/memories`}>
-            <Button variant="outline">
-              <BookMarked className="h-4 w-4 mr-1" />
-              {t("kb.memories")}
-            </Button>
-          </Link>
-          <Link href={`/dashboard/knowledge-bases/${kbId}/annotations`}>
-            <Button variant="outline">
-              <MessageSquareQuote className="h-4 w-4 mr-1" />
-              {t("annotation.title")}
-            </Button>
-          </Link>
-          {/* Low-frequency actions (edit/delete) collapsed into an overflow menu */}
-          <div className="relative">
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label={t("common.more")}
-              onClick={() => setKbMenuOpen((v) => !v)}
-            >
-              <MoreVertical className="h-4 w-4" />
-            </Button>
-            {kbMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setKbMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-50 w-28 rounded-md border border-border bg-popover shadow-md py-1">
-                  <button
-                    onClick={() => { setKbMenuOpen(false); setEditOpen(true); }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-                  >
-                    <Pencil className="h-3.5 w-3.5" /> {t("common.edit")}
-                  </button>
-                  <button
-                    onClick={() => { setKbMenuOpen(false); removeKB(); }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-accent transition-colors"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> {t("common.delete")}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-        <input
-          ref={fileRef}
-          type="file"
-          multiple
-          accept=".pdf,.docx,.doc,.md,.txt,.pptx,.html"
-          className="hidden"
-          onChange={(e) => onUpload(e.target.files)}
-        />
-        <input
-          ref={importRef}
-          type="file"
-          accept=".json"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) importKB(f);
-            e.target.value = "";
-          }}
-        />
-      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        multiple
+        accept=".pdf,.docx,.doc,.md,.txt,.pptx,.html"
+        className="hidden"
+        onChange={(e) => onUpload(e.target.files)}
+      />
+      <input
+        ref={importRef}
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) importKB(f);
+          e.target.value = "";
+        }}
+      />
 
       {uploading && uploadProgress !== null && (
         <div className="mb-4">
@@ -730,14 +619,83 @@ export default function KBDetailPage() {
           </div>
         )}
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">{t("doc.title")}</CardTitle>
-            <Input
-              value={docQuery}
-              onChange={(e) => setDocQuery(e.target.value)}
-              placeholder={t("common.search")}
-              className="max-w-xs h-8"
-            />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <CardTitle className="text-lg">{t("doc.title")}</CardTitle>
+              {kb && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {embedNameById.get(kb.embedding_model_id) ?? kb.embedding_model_id} · chunk {kb.chunk_size}/{kb.chunk_overlap} · {kb.doc_count} {t("kb.docs")}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={docQuery}
+                onChange={(e) => setDocQuery(e.target.value)}
+                placeholder={t("common.search")}
+                className="max-w-xs h-8"
+              />
+              {kb && (
+                <div className="inline-flex rounded-md border overflow-hidden">
+                  <button
+                    onClick={() => setVisibility("private")}
+                    className={cn(
+                      "px-2.5 py-1.5 text-xs transition-colors",
+                      kb.visibility === "private"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-background hover:bg-accent"
+                    )}
+                    title={t("kb.visibility_private_desc")}
+                  >
+                    {t("kb.private")}
+                  </button>
+                  <button
+                    onClick={() => setVisibility("team")}
+                    className={cn(
+                      "px-2.5 py-1.5 text-xs transition-colors border-l",
+                      kb.visibility === "team"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-background hover:bg-accent"
+                    )}
+                    title={t("kb.visibility_team_desc")}
+                  >
+                    {t("kb.team_shared")}
+                  </button>
+                </div>
+              )}
+              {kb && (
+                <div className="relative">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    aria-label={t("common.more")}
+                    onClick={() => setKbMenuOpen((v) => !v)}
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                  {kbMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setKbMenuOpen(false)} />
+                      <div className="absolute right-0 top-full mt-1 z-50 w-28 rounded-md border border-border bg-popover shadow-md py-1">
+                        <button
+                          onClick={() => { setKbMenuOpen(false); setEditOpen(true); }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+                        >
+                          <Pencil className="h-3.5 w-3.5" /> {t("common.edit")}
+                        </button>
+                        <button
+                          onClick={() => { setKbMenuOpen(false); removeKB(); }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-accent transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> {t("common.delete")}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent>
