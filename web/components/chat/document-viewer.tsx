@@ -138,7 +138,7 @@ export function DocumentViewer({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto bg-muted/20">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-muted/20">
         {error && <div className="p-4 text-sm text-destructive">{error}</div>}
         {!error && !view && (
           <div className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
@@ -206,7 +206,9 @@ function PdfPane({
   t: PdfPaneT;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const pdfjsRef = useRef<typeof import("pdfjs-dist") | null>(null);
+  const docRef = useRef<import("pdfjs-dist").PDFDocumentProxy | null>(null);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -214,9 +216,11 @@ function PdfPane({
   const [rects, setRects] = useState<{ x: number; y: number; w: number; h: number }[]>([]);
   const [viewportCss, setViewportCss] = useState<{ w: number; h: number } | null>(null);
 
+  const pageRef = useRef(page);
+  pageRef.current = page;
+
   useEffect(() => {
     let cancelled = false;
-    let pdfDoc: import("pdfjs-dist").PDFDocumentProxy | null = null;
     (async () => {
       try {
         const pdfjs = await import("pdfjs-dist");
@@ -226,8 +230,9 @@ function PdfPane({
           import.meta.url
         ).toString();
         const buf = await fetchOriginal(kbId, docId);
-        pdfDoc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+        const pdfDoc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
         if (cancelled) return;
+        docRef.current = pdfDoc;
         setPageCount(pdfDoc.numPages);
         const startPage = pickStartPage(citation.page_numbers, pdfDoc.numPages);
         setPage(startPage);
@@ -240,10 +245,26 @@ function PdfPane({
     })();
     return () => {
       cancelled = true;
-      pdfDoc?.destroy();
+      docRef.current?.destroy();
+      docRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kbId, docId]);
+
+  // Re-render at a fitted scale when the panel width changes (e.g. viewport
+  // resize), so the page always fits without horizontal scrolling.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const pdfjs = pdfjsRef.current;
+      const doc = docRef.current;
+      if (pdfjs && doc) renderPage(pdfjs, doc, pageRef.current);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function renderPage(
     pdfjs: typeof import("pdfjs-dist"),
@@ -251,7 +272,11 @@ function PdfPane({
     pageNum: number
   ) {
     const pageObj = await pdfDoc.getPage(pageNum);
-    const scale = 1.4;
+    // Fit the page to the pane width (with sensible bounds) so the viewer
+    // never produces a horizontal scrollbar.
+    const baseWidth = pageObj.getViewport({ scale: 1 }).width;
+    const available = (wrapRef.current?.clientWidth ?? 600) - 48;
+    const scale = Math.min(1.6, Math.max(0.6, available / baseWidth));
     const viewport = pageObj.getViewport({ scale });
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -314,22 +339,20 @@ function PdfPane({
       setLoading(true);
       try {
         const pdfjs = pdfjsRef.current;
-        if (!pdfjs) return;
-        const buf = await fetchOriginal(kbId, docId);
-        const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+        const doc = docRef.current;
+        if (!pdfjs || !doc) return;
         await renderPage(pdfjs, doc, p);
-        doc.destroy();
       } catch {
         /* keep previous page */
       } finally {
         setLoading(false);
       }
     },
-    [kbId, docId, pageCount]
+    [pageCount]
   );
 
   return (
-    <div className="flex flex-col items-center p-4">
+    <div ref={wrapRef} className="flex flex-col items-center p-4">
       <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
         <button
           onClick={() => goto(page - 1)}
