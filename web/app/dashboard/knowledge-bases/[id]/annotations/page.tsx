@@ -101,9 +101,9 @@ export default function AnnotationsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div>
+        <div className="flex items-baseline gap-2 flex-wrap">
           <h1 className="text-2xl font-semibold tracking-tight">{t("annotation.title")}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{t("annotation.desc")}</p>
+          <p className="text-sm text-muted-foreground">{t("annotation.desc")}</p>
         </div>
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4 mr-1" />

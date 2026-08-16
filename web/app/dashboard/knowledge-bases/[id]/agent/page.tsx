@@ -921,10 +921,10 @@ function AgentCanvas() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div>
+        <div className="flex items-baseline gap-2 flex-wrap">
           <h1 className="text-2xl font-semibold tracking-tight">{t("agent.title")}</h1>
           {agent && (
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-sm text-muted-foreground">
               {t("agent.version")} {agent.version} · {t("agent.saved_label")} {new Date(agent.updated_at).toLocaleString()}
             </p>
           )}

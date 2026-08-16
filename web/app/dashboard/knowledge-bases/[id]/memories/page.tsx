@@ -40,9 +40,9 @@ export default function MemoriesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div>
+        <div className="flex items-baseline gap-2 flex-wrap">
           <h1 className="text-2xl font-semibold tracking-tight">{t("memory.title")}</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-sm text-muted-foreground">
             {t("memory.subtitle")}
           </p>
         </div>

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import useSWR from "swr";
 import { useParams, usePathname } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api, KnowledgeBase } from "@/lib/api";
 import { useTranslations } from "next-intl";
@@ -37,12 +36,6 @@ export default function KnowledgeBaseLayout({
 
   return (
     <div>
-      <Link
-        href="/dashboard/knowledge-bases"
-        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-3"
-      >
-        <ArrowLeft className="h-4 w-4 mr-1" /> {t("kb.back")}
-      </Link>
       <h1 className="text-2xl font-semibold tracking-tight truncate">
         {kb?.name || t("kb.loading")}
       </h1>

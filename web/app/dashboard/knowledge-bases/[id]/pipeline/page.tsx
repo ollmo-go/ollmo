@@ -117,10 +117,10 @@ function PipelineCanvas() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div>
+        <div className="flex items-baseline gap-2 flex-wrap">
           <h1 className="text-2xl font-semibold tracking-tight">{t("pipeline.title")}</h1>
           {pipeline && (
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-sm text-muted-foreground">
               {t("pipeline.version")} {pipeline.version} · {t("pipeline.saved_label")} {new Date(pipeline.updated_at).toLocaleString()}
             </p>
           )}

@@ -87,9 +87,9 @@ function ExecutionsInner() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div>
+        <div className="flex items-baseline gap-2 flex-wrap">
           <h1 className="text-2xl font-semibold tracking-tight">{t("exec.title")}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{t("exec.desc")}</p>
+          <p className="text-sm text-muted-foreground">{t("exec.desc")}</p>
         </div>
         <div className="flex gap-1 rounded-md border p-0.5">
           {[
