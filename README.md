@@ -33,7 +33,7 @@ English | [简体中文](README.zh-CN.md)
 
 ![ollmo chat](screenshots/chat.png)
 
-*Knowledge Q&A — streaming replies with source citations; click a citation to open the source document with the passage highlighted*
+*Knowledge Q&A — streaming replies with source citations; clicking a citation opens the source document with the passage highlighted, side by side with the conversation*
 
 ## Why ollmo
 
