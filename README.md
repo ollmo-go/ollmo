@@ -45,6 +45,7 @@ ollmo converges everything into three steps: **upload documents, ask questions, 
 - **Multi-Tenancy** — Logical isolation across MySQL, Milvus, and MinIO; every table carries `tenant_id`.
 - **Document Pipeline** — Upload (drag & drop, paste, multi-file) → parse (MinerU / local parser) → chunk → embed → index, fully async via Asynq + Redis.
 - **Streaming Chat** — Real-time SSE streaming with source citations. Doubao-style greeting from agent opening message.
+- **Citation Tracing** — Clicking a citation opens the source document with the cited passage highlighted in place: PDF rendering, paginated parsed view, and a side-by-side chat + document panel.
 - **Annotation Q&A** — Curated question/answer pairs per KB matched by embedding similarity; a close match answers verbatim, keeping high-frequency answers consistent.
 - **Auto-Memory** — Long conversations are automatically summarized in the background (async LLM task); summaries are injected into later sessions for cross-conversation continuity. Toggleable site-wide.
 - **Personal Center** — Click your name in the chat sidebar to open the personal center: profile info, password change, and "My Usage" (personal message quota, token consumption, estimated cost, and recent call records) — members can track their own usage without entering the console.
@@ -260,11 +261,11 @@ make clean         # Remove build artifacts
 - [x] **Phase 4 — Production Readiness**: Analytics dashboard, usage & cost (billing), audit logging, conversation management (search / rename / export / pin), auto-memory summarization, personal center, annotation Q&A, super-admin console (users, tenants, plans & quotas, system settings), registration toggle.
 - [ ] **Phase 5 — Document Intelligence**:
 
-  ### 5.1 Document Preview & Citation Tracing
-  - In-chat citation clicks jump to the source document with the cited passage highlighted
-  - Document viewer: PDF render, markdown/text preview, page navigation
-  - Chunk-to-source mapping (chunk → document → page/offset)
-  - Side-by-side view: chat + source document
+  ### 5.1 Document Preview & Citation Tracing ✅
+  - [x] In-chat citation clicks jump to the source document with the cited passage highlighted
+  - [x] Document viewer: PDF render, markdown/text preview, page navigation
+  - [x] Chunk-to-source mapping (chunk → document → page/offset)
+  - [x] Side-by-side view: chat + source document
 
   ### 5.2 Advanced Document Parsing
   - Table extraction: preserve table structure as HTML for structured retrieval
