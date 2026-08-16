@@ -209,6 +209,12 @@ function PdfPane({
   const wrapRef = useRef<HTMLDivElement>(null);
   const pdfjsRef = useRef<typeof import("pdfjs-dist") | null>(null);
   const docRef = useRef<import("pdfjs-dist").PDFDocumentProxy | null>(null);
+  // Serializes renders: a new render cancels the previous task, and a
+  // monotonic sequence guards against a superseded render writing state after
+  // a newer one finished. pdf.js forbids two concurrent render() calls on the
+  // same canvas.
+  const renderSeq = useRef(0);
+  const renderTaskRef = useRef<import("pdfjs-dist").RenderTask | null>(null);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -252,11 +258,17 @@ function PdfPane({
   }, [kbId, docId]);
 
   // Re-render at a fitted scale when the panel width changes (e.g. viewport
-  // resize), so the page always fits without horizontal scrolling.
+  // resize), so the page always fits without horizontal scrolling. Only
+  // width changes trigger a re-render (height changes come from our own
+  // canvas resizing and must not loop back).
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
+    let lastWidth = 0;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (Math.abs(w - lastWidth) < 1) return;
+      lastWidth = w;
       const pdfjs = pdfjsRef.current;
       const doc = docRef.current;
       if (pdfjs && doc) renderPage(pdfjs, doc, pageRef.current);
@@ -271,25 +283,36 @@ function PdfPane({
     pdfDoc: import("pdfjs-dist").PDFDocumentProxy,
     pageNum: number
   ) {
-    const pageObj = await pdfDoc.getPage(pageNum);
-    // Fit the page to the pane width (with sensible bounds) so the viewer
-    // never produces a horizontal scrollbar.
-    const baseWidth = pageObj.getViewport({ scale: 1 }).width;
-    const available = (wrapRef.current?.clientWidth ?? 600) - 48;
-    const scale = Math.min(1.6, Math.max(0.6, available / baseWidth));
-    const viewport = pageObj.getViewport({ scale });
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
-    canvas.style.width = `${viewport.width}px`;
-    canvas.style.height = `${viewport.height}px`;
-    setViewportCss({ w: viewport.width, h: viewport.height });
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    await pageObj.render({ canvasContext: ctx, viewport }).promise;
+    // Supersede any in-flight render: pdf.js forbids concurrent render()
+    // calls on the same canvas.
+    const id = ++renderSeq.current;
+    renderTaskRef.current?.cancel();
+    renderTaskRef.current = null;
+    let task: import("pdfjs-dist").RenderTask | null = null;
+    try {
+      const pageObj = await pdfDoc.getPage(pageNum);
+      if (id !== renderSeq.current) return; // superseded while loading the page
+      // Fit the page to the pane width (with sensible bounds) so the viewer
+      // never produces a horizontal scrollbar.
+      const baseWidth = pageObj.getViewport({ scale: 1 }).width;
+      const available = (wrapRef.current?.clientWidth ?? 600) - 48;
+      const scale = Math.min(1.6, Math.max(0.6, available / baseWidth));
+      const viewport = pageObj.getViewport({ scale });
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      setViewportCss({ w: viewport.width, h: viewport.height });
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      task = pageObj.render({ canvasContext: ctx, viewport });
+      renderTaskRef.current = task;
+      await task.promise;
+      if (id !== renderSeq.current) return; // superseded during the render
 
     // Locate the cited passage in the page text layer.
     const target = normalizeText(citation.content || "").slice(0, 60);
@@ -328,8 +351,16 @@ function PdfPane({
         if (start < 0) start = i;
       }
     }
-    setRects(found);
-    setMiss(found.length === 0);
+      setRects(found);
+      setMiss(found.length === 0);
+    } catch (e) {
+      // A cancelled render throws RenderingCancelledException; only surface
+      // real failures.
+      if ((e as { name?: string })?.name === "RenderingCancelledException") return;
+      throw e;
+    } finally {
+      if (renderTaskRef.current === task) renderTaskRef.current = null;
+    }
   }
 
   const goto = useCallback(
