@@ -783,6 +783,7 @@
   },
   "analytics": {
     "title": "数据分析",
+    "subtitle": "平台整体运行概况：资源用量、文档处理与回答反馈",
     "overview": "总览",
     "knowledge_bases": "知识库",
     "documents": "文档",

@@ -144,6 +144,8 @@ export default function AnalyticsPage() {
         <BillsSection />
       ) : (
         <>
+      <p className="text-sm text-muted-foreground">{t("analytics.subtitle")}</p>
+
       {/* Overview cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard icon={BookOpen} color="blue" label={t("analytics.knowledge_bases")} value={overview?.knowledge_bases} loading={!overview} />

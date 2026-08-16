@@ -784,6 +784,7 @@
   },
   "analytics": {
     "title": "Analytics",
+    "subtitle": "Platform-wide overview: resource usage, document processing, and answer feedback",
     "overview": "Overview",
     "knowledge_bases": "Knowledge Bases",
     "documents": "Documents",
