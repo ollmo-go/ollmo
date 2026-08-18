@@ -201,6 +201,7 @@
     "status_error": "失败",
     "status_cancelled": "已中断",
     "col_time": "时间",
+    "col_user": "用户",
     "col_query": "问题",
     "col_status": "状态",
     "col_source": "来源",

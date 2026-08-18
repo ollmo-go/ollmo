@@ -64,7 +64,7 @@ type Service struct {
 	searchSvc *search.Service
 	llmRepo   *llm.Repo
 	llm       *clients.LLMClient
-	history   int // max messages fetched for context; token budget trims further
+	history   int
 	agentCfg  AgentConfigFetcher
 	agentDef  AgentDefinitionFetcher
 	memCtx    MemoryContextFetcher

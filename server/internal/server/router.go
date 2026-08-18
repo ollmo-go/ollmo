@@ -513,7 +513,17 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	// Execution history: persisted agent-graph runs for replay. Traces carry
 	// users' questions/answers, so only KB admins/owners see them.
 	executionRepo := execution.NewRepo(deps.DB)
-	executionHandler := execution.NewHandler(executionRepo)
+	executionHandler := execution.NewHandler(executionRepo, func(tenantID string, userIDs []string) map[string]string {
+		m, err := userRepo.FindByIDs(userIDs)
+		if err != nil {
+			return nil
+		}
+		names := make(map[string]string, len(m))
+		for id, u := range m {
+			names[id] = u.Name
+		}
+		return names
+	})
 	kbGrp.Get("/:kbId/executions", kbWrite, executionHandler.List)
 	kbGrp.Get("/:kbId/executions/by-message/:messageId", kbWrite, executionHandler.GetByMessage)
 	protected.Get("/executions/:id", middleware.AdminOnly(), executionHandler.Get)

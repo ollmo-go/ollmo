@@ -126,6 +126,7 @@ function ExecutionsInner() {
               <thead>
                 <tr className="text-left text-xs text-muted-foreground border-b">
                   <th className="py-2 pr-4 font-medium">{t("exec.col_time")}</th>
+                  <th className="py-2 pr-4 font-medium">{t("exec.col_user")}</th>
                   <th className="py-2 pr-4 font-medium">{t("exec.col_query")}</th>
                   <th className="py-2 pr-4 font-medium">{t("exec.col_status")}</th>
                   <th className="py-2 pr-4 font-medium">{t("exec.col_source")}</th>
@@ -139,6 +140,15 @@ function ExecutionsInner() {
                     <td className="py-2 pr-4 text-muted-foreground whitespace-nowrap">
                       {new Date(e.created_at).toLocaleString()}
                     </td>
+                    <td className="py-2 pr-4 whitespace-nowrap">
+                      {e.user_name ? (
+                        <span className="text-foreground">{e.user_name}</span>
+                      ) : e.user_id ? (
+                        <span className="font-mono text-xs text-muted-foreground">{e.user_id.slice(0, 8)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="py-2 pr-4 max-w-[280px] truncate">{e.query}</td>
                     <td className="py-2 pr-4">
                       <span className={cn("rounded-full px-2 py-0.5 text-xs", statusBadgeClass(e.status))}>
@@ -151,8 +161,6 @@ function ExecutionsInner() {
                     <td className="py-2 pr-4 text-muted-foreground whitespace-nowrap">{e.total_ms} ms</td>
                     <td className="py-2 text-right">
                       <Button size="sm" variant="outline" onClick={() => {
-                        // Open with the list row first (fast), then fetch the
-                        // full record: the list endpoint omits the heavy trace.
                         setSelected(e);
                         api.getExecution(e.id).then(setSelected).catch(() => {});
                       }}>
@@ -263,6 +271,29 @@ function ReplayDrawer({
             <p className="text-xs text-muted-foreground mt-0.5">
               {new Date(execution.created_at).toLocaleString()} · {t(`exec.status_${execution.status}`)} · {execution.total_ms} ms
             </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5 text-[11px] text-muted-foreground font-mono">
+              {execution.user_id && (
+                <span>
+                  <span className="text-muted-foreground/70">user:</span>{" "}
+                  {execution.user_name || execution.user_id.slice(0, 8)}
+                  {execution.user_name && (
+                    <span className="text-muted-foreground/60"> ({execution.user_id})</span>
+                  )}
+                </span>
+              )}
+              {execution.message_id && (
+                <span>
+                  <span className="text-muted-foreground/70">msg:</span>{" "}
+                  {execution.message_id}
+                </span>
+              )}
+              {execution.conversation_id && (
+                <span>
+                  <span className="text-muted-foreground/70">conv:</span>{" "}
+                  {execution.conversation_id}
+                </span>
+              )}
+            </div>
           </div>
           <Button size="icon" variant="ghost" onClick={onClose} aria-label={t("common.close")}>
             <X className="h-4 w-4" />

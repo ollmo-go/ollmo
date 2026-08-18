@@ -32,6 +32,21 @@ func (r *Repo) FindByID(id string) (*User, error) {
 	return &u, nil
 }
 
+func (r *Repo) FindByIDs(ids []string) (map[string]*User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var users []*User
+	if err := r.db.Where("id IN ?", ids).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	m := make(map[string]*User, len(users))
+	for _, u := range users {
+		m[u.ID] = u
+	}
+	return m, nil
+}
+
 func (r *Repo) ListByTenant(tenantID string) ([]*User, error) {
 	var users []*User
 	err := r.db.Where("tenant_id = ?", tenantID).Order("created_at ASC").Find(&users).Error

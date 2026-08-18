@@ -26,6 +26,7 @@ type Execution struct {
 	ConversationID string    `gorm:"size:36;index" json:"conversation_id,omitempty"`
 	MessageID      string    `gorm:"size:36" json:"message_id,omitempty"`
 	UserID         string    `gorm:"size:36" json:"user_id,omitempty"`
+	UserName       string    `gorm:"-" json:"user_name,omitempty"`
 	Source         string    `gorm:"size:16;not null;default:'chat'" json:"source"`
 	Status         string    `gorm:"size:16;not null;default:'success'" json:"status"`
 	Query          string    `gorm:"type:text" json:"query"`

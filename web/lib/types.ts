@@ -635,6 +635,7 @@ export interface Execution {
   conversation_id?: string;
   message_id?: string;
   user_id?: string;
+  user_name?: string;
   source: "chat" | "test";
   status: "success" | "error" | "cancelled";
   query: string;
