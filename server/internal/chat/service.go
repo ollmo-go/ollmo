@@ -396,6 +396,17 @@ func (s *Service) Stream(ctx context.Context, tenantID, userID, convID string, i
 		return nil, errs.BadRequest("message is required")
 	}
 
+	query := in.Query
+	if query == "" {
+		query = in.Message
+	}
+
+	if s.annMatch != nil {
+		if m := s.annMatch.Match(ctx, tenantID, conv.KbID, query); m != nil {
+			return s.streamAnnotation(ctx, tenantID, userID, conv, in, query, m)
+		}
+	}
+
 	// Atomically consume one unit from the daily quota before touching the
 	// LLM: both caps are checked and both counters incremented in a single
 	// Redis operation, so concurrent requests cannot overshoot the limit.

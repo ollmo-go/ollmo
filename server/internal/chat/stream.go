@@ -217,16 +217,6 @@ func (s *Service) runStream(
 		query = in.Message
 	}
 
-	// Annotation reply: a close-enough question match short-circuits the
-	// whole pipeline (retrieval, agent graph, LLM) and streams the curated
-	// answer verbatim.
-	if s.annMatch != nil {
-		if m := s.annMatch.Match(ctx, tenantID, conv.KbID, query); m != nil {
-			s.replyAnnotation(ctx, tenantID, conv, m, out, totalStart, provider, query)
-			return
-		}
-	}
-
 	// Try graph-based execution when a full agent definition is available.
 	// This supports classifier/condition/message routing. Falls back to the
 	// flat ExecutionConfig path when no definition is wired.
@@ -316,6 +306,53 @@ func (s *Service) runStream(
 	if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
 		log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
 	}
+}
+
+func (s *Service) streamAnnotation(
+	ctx context.Context,
+	tenantID, userID string,
+	conv *Conversation,
+	in SendInput,
+	query string,
+	m *annotation.MatchResult,
+) (<-chan StreamReply, error) {
+	cfg := s.loadAgentConfig(ctx, tenantID, conv.KbID)
+	provider, err := s.resolveProvider(ctx, tenantID, cfg.LLMModelID)
+	if err != nil {
+		return nil, err
+	}
+
+	userMsg := &Message{
+		ID:             uuid.NewString(),
+		TenantID:       tenantID,
+		ConversationID: conv.ID,
+		Role:           RoleUser,
+		Content:        in.Message,
+	}
+	if err := s.repo.CreateMsg(userMsg); err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, "save user message", err)
+	}
+	if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
+		log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
+	}
+
+	out := make(chan StreamReply, 16)
+	src := make(chan StreamReply, 16)
+	go s.replyAnnotation(ctx, tenantID, conv, m, src, time.Now(), provider, query)
+
+	go func() {
+		defer close(out)
+		s.hub.Publish(conv.ID, StreamReply{Phase: PhaseUser, MessageID: userMsg.ID, Token: in.Message})
+		for r := range src {
+			s.hub.Publish(conv.ID, r)
+			if !send(ctx, out, r) {
+				for range src {
+				}
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 // replyAnnotation streams a matched annotation answer through the same SSE
