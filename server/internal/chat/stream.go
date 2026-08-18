@@ -259,6 +259,7 @@ func (s *Service) runStream(
 	}
 	systemContext, cits := formatContext(res.Hits)
 	if !send(ctx, out, StreamReply{Phase: PhaseRetrieve, Citations: cits}) {
+		s.saveAssistant(tenantID, conv.ID, "（连接中断，请重试）", cits, nil, "", false)
 		return
 	}
 
@@ -277,6 +278,7 @@ func (s *Service) runStream(
 	msgs, promptTrimmed := buildPrompt(systemContext, graphCtx, memoryCtx, history, in.Message, userMsg.ID, cfg.SystemPrompt, budget)
 	if ctxTrimmed || promptTrimmed {
 		if !send(ctx, out, StreamReply{Phase: PhaseWarning, Warning: "Context trimmed to fit the model window."}) {
+			s.saveAssistant(tenantID, conv.ID, "（连接中断，请重试）", cits, nil, "", false)
 			return
 		}
 	}
@@ -590,6 +592,9 @@ func (s *Service) runGraph(
 
 	cits := citationsFromAny(ec.Citations)
 	if !send(ctx, out, StreamReply{Phase: PhaseRetrieve, Citations: cits}) {
+		if persist {
+			s.saveAssistant(tenantID, convID, "（连接中断，请重试）", cits, nil, "", false)
+		}
 		return
 	}
 
@@ -604,6 +609,12 @@ func (s *Service) runGraph(
 		}
 		answer = text
 		if !send(ctx, out, StreamReply{Phase: PhaseGenerate, Token: text}) {
+			if persist {
+				s.saveAssistant(tenantID, convID, text, cits, &ReplyStats{
+					RetrieveMs: retrieveMs,
+					TotalMs:    int(time.Since(totalStart).Milliseconds()),
+				}, "", false)
+			}
 			return
 		}
 		var assistantID string
@@ -644,6 +655,9 @@ func (s *Service) runGraph(
 		msgs, promptTrimmed := buildPrompt(ec.SystemContext, ec.GraphContext, ec.MemoryContext, history, userMessage, excludeMsgID, cfg.SystemPrompt, budget)
 		if promptTrimmed {
 			if !send(ctx, out, StreamReply{Phase: PhaseWarning, Warning: "Context trimmed to fit the model window."}) {
+				if persist {
+					s.saveAssistant(tenantID, convID, "（连接中断，请重试）", cits, nil, "", false)
+				}
 				return
 			}
 		}
@@ -691,6 +705,9 @@ func (s *Service) runGraph(
 	default:
 		status = execution.StatusError
 		send(ctx, out, StreamReply{Phase: PhaseError, Error: "agent graph ended without a terminal node"})
+		if persist {
+			s.saveAssistant(tenantID, convID, "（Agent 执行异常，请重试）", cits, nil, "", false)
+		}
 	}
 }
 
