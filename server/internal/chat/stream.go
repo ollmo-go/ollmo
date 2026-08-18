@@ -111,8 +111,8 @@ func (s *Service) DebugAgentNode(ctx context.Context, tenantID, kbID string, nod
 
 // send delivers a reply to the client channel, respecting ctx cancellation.
 // Returns false when ctx is cancelled (client disconnected) so the caller can
-// stop streaming and persist partial results instead of blocking forever on a
-// full channel buffer.
+// stop sending SSE events while the LLM continues producing output in the
+// background.
 func send(ctx context.Context, out chan<- StreamReply, r StreamReply) bool {
 	select {
 	case out <- r:
@@ -129,7 +129,9 @@ func send(ctx context.Context, out chan<- StreamReply, r StreamReply) bool {
 // token usage, generate duration, and termination status:
 //   - streamErr != "": the LLM stream reported an error (already sent as
 //     PhaseError); content/reasoning hold whatever was produced before it.
-//   - cancelled: the client disconnected mid-stream (send returned false).
+//   - cancelled: the client disconnected mid-stream but the LLM call
+//     continued to completion via an independent context, so content holds
+//     the full generated answer.
 //   - otherwise: the stream completed normally.
 //
 // This function performs no DB writes; callers own persistence.
@@ -164,12 +166,23 @@ func (s *Service) streamLLM(
 		Stream:          true,
 	}
 
+	// Independent context so the LLM call survives client disconnects.
+	// The stream keeps running for up to 10 min even if the user closes
+	// the browser; output is still saved so the conversation history stays
+	// consistent with what was generated.
+	llmCtx, cancelLLM := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancelLLM()
+
 	var sb, rb strings.Builder
 	generateStart := time.Now()
-	for delta := range s.llm.ChatStream(ctx, provider.Endpoint, provider.APIKey, req) {
+	clientGone := false
+
+	for delta := range s.llm.ChatStream(llmCtx, provider.Endpoint, provider.APIKey, req) {
 		if delta.Err != nil {
-			send(ctx, out, StreamReply{Phase: PhaseError, Error: delta.Err.Error()})
-			return sb.String(), rb.String(), usage, int(time.Since(generateStart).Milliseconds()), delta.Err.Error(), false
+			if !clientGone {
+				send(ctx, out, StreamReply{Phase: PhaseError, Error: delta.Err.Error()})
+			}
+			return sb.String(), rb.String(), usage, int(time.Since(generateStart).Milliseconds()), delta.Err.Error(), clientGone
 		}
 		if delta.Done {
 			break
@@ -179,18 +192,22 @@ func (s *Service) streamLLM(
 		}
 		if delta.Reasoning != "" {
 			rb.WriteString(delta.Reasoning)
-			if !send(ctx, out, StreamReply{Phase: PhaseThinking, Token: delta.Reasoning}) {
-				return sb.String(), rb.String(), usage, int(time.Since(generateStart).Milliseconds()), "", true
+			if !clientGone {
+				if !send(ctx, out, StreamReply{Phase: PhaseThinking, Token: delta.Reasoning}) {
+					clientGone = true
+				}
 			}
 		}
 		if delta.Content != "" {
 			sb.WriteString(delta.Content)
-			if !send(ctx, out, StreamReply{Phase: PhaseGenerate, Token: delta.Content}) {
-				return sb.String(), rb.String(), usage, int(time.Since(generateStart).Milliseconds()), "", true
+			if !clientGone {
+				if !send(ctx, out, StreamReply{Phase: PhaseGenerate, Token: delta.Content}) {
+					clientGone = true
+				}
 			}
 		}
 	}
-	return sb.String(), rb.String(), usage, int(time.Since(generateStart).Milliseconds()), "", false
+	return sb.String(), rb.String(), usage, int(time.Since(generateStart).Milliseconds()), "", clientGone
 }
 
 func (s *Service) runStream(
@@ -286,8 +303,27 @@ func (s *Service) runStream(
 	content, reasoning, usage, generateMs, streamErr, cancelled := s.streamLLM(ctx, out, provider, cfg, msgs)
 	totalMs := int(time.Since(totalStart).Milliseconds())
 
-	if streamErr != "" || cancelled {
+	if streamErr != "" {
 		s.saveAssistant(tenantID, conv.ID, content, cits, nil, reasoning, false)
+		return
+	}
+	if cancelled {
+		stats := &ReplyStats{
+			RetrieveMs: retrieveMs,
+			GenerateMs: generateMs,
+			TotalMs:    totalMs,
+		}
+		if usage != nil {
+			stats.PromptTokens = usage.PromptTokens
+			stats.CompletionTokens = usage.CompletionTokens
+			stats.TotalTokens = usage.TotalTokens
+		}
+		s.recordUsage(tenantID, conv.OwnerID, conv.ID, conv.KbID, bill.SourceChat, provider, usage)
+		s.saveAssistant(tenantID, conv.ID, content, cits, stats, reasoning, false)
+		s.triggerAutoMemory(tenantID, conv.ID)
+		if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
+			log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
+		}
 		return
 	}
 	stats := &ReplyStats{
@@ -615,6 +651,9 @@ func (s *Service) runGraph(
 					TotalMs:    int(time.Since(totalStart).Milliseconds()),
 				}, "", false)
 			}
+			if strings.TrimSpace(text) != "" {
+				status = execution.StatusSuccess
+			}
 			return
 		}
 		var assistantID string
@@ -665,13 +704,38 @@ func (s *Service) runGraph(
 		totalMs := int(time.Since(totalStart).Milliseconds())
 
 		answer = content
-		if streamErr != "" || cancelled {
+		if streamErr != "" {
 			if persist {
 				s.saveAssistant(tenantID, convID, content, cits, nil, reasoning, false)
 			}
-			if streamErr != "" {
-				status = execution.StatusError
+			status = execution.StatusError
+			return
+		}
+		if cancelled {
+			// Client disconnected mid-stream, but LLM produced the full
+			// answer. Save everything — billing, message row, conv touch —
+			// so the conversation record stays consistent with what was
+			// actually generated.
+			stats := &ReplyStats{
+				RetrieveMs: retrieveMs,
+				GenerateMs: generateMs,
+				TotalMs:    totalMs,
 			}
+			if usage != nil {
+				stats.PromptTokens = usage.PromptTokens
+				stats.CompletionTokens = usage.CompletionTokens
+				stats.TotalTokens = usage.TotalTokens
+			}
+			s.recordUsage(tenantID, userID, convID, kbID, bill.SourceChat, llmProvider, usage)
+			if persist {
+				assistantID := s.saveAssistant(tenantID, convID, content, cits, stats, reasoning, false)
+				messageID = assistantID
+				s.triggerAutoMemory(tenantID, convID)
+				if err := s.repo.TouchConv(tenantID, convID); err != nil {
+					log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, convID, err)
+				}
+			}
+			status = execution.StatusSuccess
 			return
 		}
 		stats := &ReplyStats{
