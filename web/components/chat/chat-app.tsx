@@ -384,7 +384,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
 
   async function send(overrideText?: string) {
     const text = (overrideText ?? draft).trim();
-    if (!text || streaming) return;
+    if (!text || selfStreamingRef.current) return;
     if (!selectedKb) {
       toast.error(t("chat.pick_kb_first"));
       return;
