@@ -189,6 +189,7 @@ export interface DiscoveredModel {
   name?: string;
   context_length?: number;
   max_tokens?: number;
+  note?: string;
 }
 
 // Static catalog entry: a known vendor with a default endpoint and curated

@@ -2,33 +2,15 @@
 
 import { useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { AgentEdge, AgentNode, LLMModel, NodeDebugResult, Paginated, ProviderCard, RerankModel, api } from "@/lib/api";
+import { AgentEdge, AgentNode, LLMModel, Paginated, ProviderCard, RerankModel, api } from "@/lib/api";
 import { useTranslations } from "next-intl";
-import { toast } from "sonner";
-import { ChevronDown, Copy, Loader2, Play, Plus, Trash2, Variable } from "lucide-react";
+import { ChevronDown, Plus, Trash2, Variable } from "lucide-react";
 import { ProviderModelSelect } from "@/components/ui/provider-model-select";
+import { NodeDebugSection } from "./node-debug-section";
+import { Field, TextInput, TextArea, NumberInput, Toggle } from "./_fields";
+import { NODE_TYPE_KEY, NODE_OUTPUTS, normalizeCategories, upstreamOf } from "./_shared";
 
-const NODE_TYPE_KEY: Record<string, string> = {
-  retrieval: "node_retrieval",
-  llm: "node_llm",
-  message: "node_message",
-  condition: "node_condition",
-  classifier: "node_classifier",
-  note: "node_note",
-};
-
-// Outputs each node type publishes to the variable table. Keys mirror the
-// executor's registrations (see internal/agent/executor.go).
-const NODE_OUTPUTS: Record<string, { key: string; labelKey: string }[]> = {
-  retrieval: [
-    { key: "context", labelKey: "agent.var_context" },
-    { key: "graph_context", labelKey: "agent.var_graph_context" },
-    { key: "hit_count", labelKey: "agent.var_hit_count" },
-    { key: "top_score", labelKey: "agent.var_top_score" },
-  ],
-  classifier: [{ key: "label", labelKey: "agent.var_label" }],
-  llm: [{ key: "output", labelKey: "agent.var_output" }],
-};
+export { normalizeCategories };
 
 export function AgentConfigPanel({
   node,
@@ -60,8 +42,6 @@ export function AgentConfigPanel({
   kbId?: string;
 }) {
   const t = useTranslations();
-  // Test query shared across nodes: debugging a flow means running the same
-  // question through node after node, so it survives node switches.
   const [debugQuery, setDebugQuery] = useState("");
   const { data: llmsData } = useSWR<Paginated<LLMModel>>("llm-list", () =>
     api.listLLMs(1, 50)
@@ -76,7 +56,6 @@ export function AgentConfigPanel({
   );
   const providers = providerCards ?? [];
 
-  // Node config takes precedence, then edge config, then agent-level settings.
   if (node) {
     const nodeTypeLabel = NODE_TYPE_KEY[node.type]
       ? t(`agent.${NODE_TYPE_KEY[node.type]}`)
@@ -90,8 +69,6 @@ export function AgentConfigPanel({
           ) : null}
         </div>
         {renderEditor(node, (patch) => onChange(node.id, { ...node.data, ...patch }), t, llms, reranks, providers, allNodes, allEdges)}
-        {/* Single-node debug: run the selected node in isolation. Notes are
-            display-only and never execute, so they skip this section. */}
         {kbId && node.type !== "note" && (
           <NodeDebugSection key={node.id} kbId={kbId} node={node} query={debugQuery} onQueryChange={setDebugQuery} />
         )}
@@ -100,7 +77,6 @@ export function AgentConfigPanel({
   }
 
   if (edge) {
-    // "true"/"false" and legacy Chinese spellings match the same branches.
     const isTrue = edge.label === t("agent.branch_true") || edge.label === "true" || edge.label === "条件成立";
     const isFalse = edge.label === t("agent.branch_false") || edge.label === "false" || edge.label === "条件不成立";
     const branchBtn = (active: boolean, label: string, onClick: () => void) => (
@@ -117,8 +93,6 @@ export function AgentConfigPanel({
     );
     const isClassifier = sourceNodeType === "classifier";
     const isCondition = sourceNodeType === "condition";
-    // Categories may be {name, description} objects; only the name is a
-    // routable label.
     const categories = (sourceNodeCategories ?? [])
       .map((c) => (typeof c === "string" ? c : String((c as { name?: string })?.name ?? "")))
       .filter(Boolean);
@@ -126,8 +100,6 @@ export function AgentConfigPanel({
       <div className="p-4 space-y-3">
         <div className="text-sm font-medium">{t("agent.edge_config")}</div>
         {isClassifier ? (
-          // Classifier branches must match a category exactly, so the label
-          // is picked from the source node's list instead of free typing.
           categories.length > 0 ? (
             <Field label={t("agent.field_edge_label")}>
               <div className="flex flex-wrap gap-1.5">
@@ -150,8 +122,6 @@ export function AgentConfigPanel({
             <p className="text-xs text-muted-foreground">{t("agent.edge_classifier_empty")}</p>
           )
         ) : isCondition ? (
-          // Condition edges route on true/false only — same pick-don't-type
-          // rule as classifier edges.
           <Field label={t("agent.field_edge_label")}>
             <div className="flex gap-2">
               {branchBtn(isTrue, t("agent.branch_true"), () => onEdgeLabelChange(edge.id, t("agent.branch_true")))}
@@ -170,7 +140,6 @@ export function AgentConfigPanel({
     );
   }
 
-  // Nothing selected: show agent-level settings (opening message + suggested questions).
   return (
     <div className="p-4 space-y-3">
       <div className="text-sm font-medium">{t("agent.general_settings")}</div>
@@ -305,9 +274,6 @@ function renderEditor(
         />
       );
     case "condition": {
-      // Variables come from the shared table: the query plus any upstream
-      // node output ({slug.key}). The legacy shared hit_count/top_score
-      // values stay selectable only when already set on old graphs.
       const upstream = upstreamOf(allNodes, allEdges, node.id);
       const variable = String(node.data.variable || "query");
       const legacy =
@@ -368,8 +334,6 @@ function renderEditor(
       );
     }
     case "classifier": {
-      // Categories carry an optional description the LLM uses as its judging
-      // basis; the legacy plain-string form is normalized on read.
       const cats = normalizeCategories(node.data.categories);
       const setCat = (i: number, p: Partial<{ name: string; description: string }>) =>
         patch({ categories: cats.map((c, idx) => (idx === i ? { ...c, ...p } : c)) });
@@ -437,182 +401,6 @@ function renderEditor(
   }
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-// NodeDebugSection runs the selected node in isolation against a test query.
-// The query lives in the parent so it survives node switches; results reset
-// per node via the key set at the call site.
-function NodeDebugSection({
-  kbId,
-  node,
-  query,
-  onQueryChange,
-}: {
-  kbId: string;
-  node: AgentNode;
-  query: string;
-  onQueryChange: (v: string) => void;
-}) {
-  const t = useTranslations();
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<NodeDebugResult | null>(null);
-
-  async function run() {
-    const q = query.trim();
-    if (!q) {
-      toast(t("agent.debug_no_query"));
-      return;
-    }
-    setRunning(true);
-    setResult(null);
-    try {
-      const res = await api.debugAgentNode(kbId, node, q);
-      setResult(res);
-    } catch (e) {
-      toast((e as Error).message);
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  return (
-    <div className="border-t pt-3 space-y-2">
-      <div className="text-sm font-medium">{t("agent.test_node")}</div>
-      {/* min-w-0 lets the input shrink below its typed value's intrinsic
-          width — long test queries used to stretch the panel and cause a
-          horizontal scrollbar. */}
-      <div className="flex gap-2 min-w-0">
-        <input
-          value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              run();
-            }
-          }}
-          placeholder={t("agent.debug_query_placeholder")}
-          className="flex-1 min-w-0 rounded-md border border-border bg-background px-2 py-1 text-sm"
-        />
-        <button
-          onClick={run}
-          disabled={running}
-          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50 transition-colors"
-        >
-          {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-          {t("agent.debug_run")}
-        </button>
-      </div>
-      {result && (
-        <div className="rounded-md border bg-muted/30 p-2 text-xs space-y-2 overflow-hidden">
-          <div className="flex items-center gap-1.5 text-muted-foreground flex-wrap">
-            <span className="inline-flex items-center rounded bg-background px-1.5 py-0.5 border">
-              {result.duration_ms != null ? `${result.duration_ms}ms` : ""}
-            </span>
-            {result.type === "retrieval" && (
-              <span className="inline-flex items-center rounded bg-background px-1.5 py-0.5 border">
-                {t("agent.debug_hits", { count: result.hits ?? 0 })}
-              </span>
-            )}
-            {result.type === "retrieval" && result.top_score ? (
-              <span className="inline-flex items-center rounded bg-background px-1.5 py-0.5 border">
-                {t("agent.var_top_score")} {result.top_score.toFixed(3)}
-              </span>
-            ) : null}
-          </div>
-          {/* Variables this node would expose downstream, keyed exactly as
-              prompts/conditions reference them. Key and value sit on separate
-              lines — side-by-side squeezes both in this narrow panel. Click
-              a row to copy the key for pasting into a downstream node. */}
-          {result.variables && Object.keys(result.variables).length > 0 && (
-            <div className="space-y-1">
-              <div className="text-muted-foreground">{t("agent.debug_vars")}</div>
-              <div className="rounded-md border divide-y overflow-hidden">
-                {Object.entries(result.variables).map(([k, v]) => (
-                  <button
-                    key={k}
-                    type="button"
-                    title={t("agent.debug_copy_var")}
-                    onClick={() => {
-                      navigator.clipboard.writeText(k);
-                      toast(t("agent.debug_var_copied"));
-                    }}
-                    className="w-full text-left px-2 py-1.5 hover:bg-accent/50 transition-colors group"
-                  >
-                    <div className="flex items-center gap-1 min-w-0">
-                      <code className="min-w-0 truncate font-mono text-[11px] text-primary/90">{k}</code>
-                      <Copy className="ml-auto shrink-0 h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                    <div className="mt-0.5 break-words text-foreground/80">{v}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="max-h-48 overflow-y-auto space-y-1.5 min-w-0">
-            {(result.type === "retrieval" ? result.context : result.text)
-              ?.split(/\n\n+/)
-              .map((seg) => seg.trim())
-              .filter(Boolean)
-              .map((seg, i) => (
-                <p
-                  key={i}
-                  className="whitespace-pre-wrap break-words min-w-0 text-foreground/80 bg-background rounded border px-2 py-1.5"
-                >
-                  {seg}
-                </p>
-              ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Classifier categories: {name, description} objects. Reads the legacy
-// plain-string array too so existing graphs keep working.
-export function normalizeCategories(raw: unknown): { name: string; description: string }[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map((c) =>
-    typeof c === "string"
-      ? { name: c, description: "" }
-      : { name: String((c as { name?: string })?.name ?? ""), description: String((c as { description?: string })?.description ?? "") }
-  );
-}
-
-// upstreamOf returns every node reachable from nodeId by walking edges
-// backwards (its transitive ancestors on the canvas).
-function upstreamOf(nodes: AgentNode[], edges: AgentEdge[], nodeId: string): AgentNode[] {
-  const rev = new Map<string, string[]>();
-  for (const e of edges) {
-    rev.set(e.target, [...(rev.get(e.target) ?? []), e.source]);
-  }
-  const seen = new Set<string>([nodeId]);
-  const out: AgentNode[] = [];
-  const stack = [nodeId];
-  while (stack.length) {
-    const cur = stack.pop()!;
-    for (const src of rev.get(cur) ?? []) {
-      if (seen.has(src)) continue;
-      seen.add(src);
-      stack.push(src);
-      const n = nodes.find((x) => x.id === src);
-      if (n) out.push(n);
-    }
-  }
-  return out;
-}
-
-// PromptField is a TextArea for prompt-like text with an "insert variable"
-// picker. Only upstream nodes' outputs are listed; picking one inserts the
-// {slug.output} reference at the cursor.
 function PromptField({
   label,
   hint,
@@ -640,8 +428,6 @@ function PromptField({
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const upstream = useMemo(() => upstreamOf(nodes, edges, nodeId), [nodes, edges, nodeId]);
 
-  // The panel body is a scroll container that would clip an absolute popup,
-  // so the menu is fixed-positioned from the button's viewport coordinates.
   function toggleMenu() {
     if (open) {
       setOpen(false);
@@ -649,8 +435,8 @@ function PromptField({
     }
     const r = btnRef.current?.getBoundingClientRect();
     if (r) {
-      const W = 240; // w-60
-      const H = 288; // max-h-72
+      const W = 240;
+      const H = 288;
       const left = Math.max(8, Math.min(r.right - W, window.innerWidth - W - 8));
       const top = r.bottom + 6 + H > window.innerHeight
         ? Math.max(8, r.top - H - 6)
@@ -746,80 +532,5 @@ function PromptField({
       <TextArea value={value} onChange={onChange} rows={rows} textareaRef={ref} />
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </div>
-  );
-}
-
-function TextInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
-    />
-  );
-}
-
-function TextArea({
-  value,
-  onChange,
-  rows = 4,
-  textareaRef,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  rows?: number;
-  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
-}) {
-  return (
-    <textarea
-      ref={textareaRef}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      rows={rows}
-      className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm resize-y"
-    />
-  );
-}
-
-function NumberInput({
-  value,
-  onChange,
-  step,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  step?: number;
-}) {
-  return (
-    <input
-      type="number"
-      value={value}
-      step={step || 1}
-      onChange={(e) => onChange(Number(e.target.value) || 0)}
-      className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
-    />
-  );
-}
-
-function Toggle({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="flex items-center justify-between cursor-pointer">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4"
-      />
-    </label>
   );
 }
