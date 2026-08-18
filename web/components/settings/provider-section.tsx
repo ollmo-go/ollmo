@@ -460,7 +460,7 @@ function ProviderEditor({
               });
             }
           } else {
-            await api.providers.addModel(card.id, kind, {
+            const ref = await api.providers.addModel(card.id, kind, {
               model: m.model,
               name: m.name,
               context_length: m.context_length,
@@ -472,6 +472,11 @@ function ProviderEditor({
                   }
                 : {}),
             });
+            if (m.is_default && ref.id) {
+              if (kind === "llm") await api.updateLLM(ref.id, { is_default: true });
+              else if (kind === "embedding") await api.updateEmbedding(ref.id, { is_default: true });
+              else await api.updateRerank(ref.id, { is_default: true });
+            }
           }
         }
       };
@@ -874,6 +879,9 @@ function ModelListEditor({
   const [textBuf, setTextBuf] = useState<Record<string, string>>({});
   // Tracks which row is running an unsaved-model connectivity test.
   const [localTesting, setLocalTesting] = useState<string | null>(null);
+  // Draft rows that passed probe-model testing — they become eligible for
+  // the star (set-default) button without being persisted yet.
+  const [testedKeys, setTestedKeys] = useState<Set<string>>(new Set());
 
   function patch(key: string, next: Partial<DraftModel>) {
     onChange(models.map((m) => (m.key === key ? { ...m, ...next } : m)));
@@ -938,8 +946,14 @@ function ModelListEditor({
         endpoint: probe.endpoint,
         api_key: probe.api_key ?? "",
         model: m.model.trim(),
+        ...(probe.provider_id ? { provider_id: probe.provider_id } : {}),
       });
       toast.success(`${m.model.trim()} OK`);
+      setTestedKeys((cur) => {
+        const n = new Set(cur);
+        n.add(m.key);
+        return n;
+      });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -1049,13 +1063,24 @@ function ModelListEditor({
                   <ChevronRight className="h-4 w-4" />
                 )}
               </button>
-              {m.rowId && onMakeDefault && (
+              {(m.rowId || testedKeys.has(m.key)) && (
                 <button
                   type="button"
                   className="shrink-0 text-muted-foreground hover:text-primary disabled:opacity-50"
                   title={m.is_default ? t("settings.unset_default") : t("settings.set_default")}
                   disabled={disabled}
-                  onClick={() => onMakeDefault(m.rowId!, !!m.is_default)}
+                  onClick={() => {
+                    if (m.rowId && onMakeDefault) {
+                      onMakeDefault(m.rowId, !!m.is_default);
+                    } else {
+                      onChange(
+                        models.map((row) => ({
+                          ...row,
+                          is_default: row.key === m.key ? !row.is_default : false,
+                        }))
+                      );
+                    }
+                  }}
                 >
                   <Star className={cn("h-3.5 w-3.5", m.is_default && "fill-primary text-primary")} />
                 </button>

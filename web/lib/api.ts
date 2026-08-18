@@ -1064,6 +1064,7 @@ export const api = {
       endpoint: string;
       api_key: string;
       model: string;
+      provider_id?: string;
     }): Promise<{ reply: string }> {
       return request("/providers/probe-model", {
         method: "POST",
