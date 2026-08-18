@@ -104,6 +104,7 @@ function AgentChatDrawer({ kbId, onClose, onTrace, onTraceStep, onSendStart }: {
   const [streamedText, setStreamedText] = useState("");
   const [streamedThinking, setStreamedThinking] = useState("");
   const [pendingCitations, setPendingCitations] = useState<Citation[]>([]);
+  const [greeting, setGreeting] = useState("");
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -136,14 +137,7 @@ function AgentChatDrawer({ kbId, onClose, onTrace, onTraceStep, onSendStart }: {
     if (!agent) return;
     const msg = agent.definition?.opening_message;
     if (typeof msg === "string" && msg) {
-      setMessages([{
-        id: "greeting",
-        tenant_id: "",
-        conversation_id: "",
-        role: "assistant",
-        content: msg,
-        created_at: new Date().toISOString(),
-      }]);
+      setGreeting(msg);
     }
     const qs = agent.definition?.suggested_questions;
     setSuggestedQuestions(Array.isArray(qs) ? qs : []);
@@ -270,15 +264,22 @@ function AgentChatDrawer({ kbId, onClose, onTrace, onTraceStep, onSendStart }: {
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
-          {messages.length === 0 && !streaming && (
-            <p className="text-sm text-muted-foreground text-center mt-8">
-              {t("agent.test_placeholder")}
-            </p>
-          )}
-          {messages.map((m) => (
-            <MessageBubble key={m.id} message={m} kbId={kbId} />
-          ))}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
+            {messages.length === 0 && !streaming && greeting && (
+              <div className="flex justify-start group relative">
+                <div className="max-w-[80%] rounded-lg px-4 py-2 bg-muted text-foreground">
+                  <div className="text-sm whitespace-pre-wrap">{greeting}</div>
+                </div>
+              </div>
+            )}
+            {messages.length === 0 && !streaming && !greeting && (
+              <p className="text-sm text-muted-foreground text-center mt-8">
+                {t("agent.test_placeholder")}
+              </p>
+            )}
+            {messages.map((m) => (
+              <MessageBubble key={m.id} message={m} kbId={kbId} />
+            ))}
 
           {/* Suggested questions: shown until the user sends the first message. */}
           {suggestedQuestions.length > 0 &&

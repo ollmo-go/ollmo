@@ -144,7 +144,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
   }, [convs, selectedConv, selectedKb]);
 
   const { data: agentData } = useSWR(
-    authed && selectedKb && !selectedConv ? `agent-${selectedKb}` : null,
+    authed && selectedKb ? `agent-${selectedKb}` : null,
     () => api.getAgent(selectedKb!)
   );
   const { data: msgQuota, mutate: mutateQuota } = useSWR(
@@ -153,13 +153,12 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
   );
   const quotaExceeded = msgQuota !== undefined && msgQuota.quota >= 0 && msgQuota.remaining <= 0;
   useEffect(() => {
-    if (!selectedKb || selectedConv) {
+    if (!selectedKb) {
       setGreeting("");
       setSuggestedQuestions([]);
       return;
     }
     const def = agentData?.definition;
-    // Opening message: prefer definition-level, fall back to legacy start node.
     let msg = def?.opening_message;
     if (!msg) {
       const startNode = def?.nodes?.find((n) => n.type === "start");
@@ -168,7 +167,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     }
     setGreeting(typeof msg === "string" ? msg : "");
     setSuggestedQuestions(Array.isArray(def?.suggested_questions) ? def!.suggested_questions : []);
-  }, [agentData, selectedKb, selectedConv]);
+  }, [agentData, selectedKb]);
 
   const skipFetchRef = useRef(false);
   // True while this client is sending its own turn (send -> stream done).
@@ -187,6 +186,12 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
     }
     api.listMessages(selectedConv).then((r) => setMessages(r.items)).catch(() => setMessages([]));
   }, [selectedConv]);
+
+  const hasUserMessages = messages.some((m) => m.role === "user");
+  const showGreeting = !!selectedConv && !streaming && !hasUserMessages && !!greeting;
+  const visibleMessages = greeting
+    ? messages.filter((m) => !(m.role === "assistant" && m.content === greeting && !hasUserMessages))
+    : messages;
 
   // Observer stream: follow the selected conversation so a turn streamed
   // from another tab/device renders here live. Self-sent turns are skipped
@@ -522,8 +527,8 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
   // Index of the last assistant message; follow-up chips render only under it
   // so history stays clean and chips always track the latest reply.
   let lastAssistantIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "assistant") {
+  for (let i = visibleMessages.length - 1; i >= 0; i--) {
+    if (visibleMessages[i].role === "assistant") {
       lastAssistantIdx = i;
       break;
     }
@@ -786,7 +791,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
               variant="outline"
               size="sm"
               onClick={summarize}
-              disabled={summarizing || messages.length < 2}
+              disabled={summarizing || visibleMessages.length < 2}
               className="ml-auto"
             >
               <Brain className="h-3.5 w-3.5 mr-1" />
@@ -805,7 +810,30 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                 className="max-w-3xl mx-auto space-y-4 pr-2"
                 style={{ paddingBottom: inputBarH + 24 }}
               >
-                {messages.map((m, i) => {
+                {showGreeting && (
+                  <div>
+                    <div className="flex justify-start group relative">
+                      <div className="max-w-[80%] rounded-lg px-4 py-2 bg-muted text-foreground">
+                        <div className="text-sm whitespace-pre-wrap">{greeting}</div>
+                      </div>
+                    </div>
+                    {suggestedQuestions.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {suggestedQuestions.map((q) => (
+                          <button
+                            key={q}
+                            onClick={() => send(q)}
+                            disabled={streaming || quotaExceeded}
+                            className="rounded-full border border-border bg-background px-4 py-2 text-sm text-foreground hover:bg-accent hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {visibleMessages.map((m, i) => {
                   const chips = !streaming && m.role === "assistant" && i === lastAssistantIdx ? parseFollowUps(m.follow_ups) : [];
                   return (
                     <div key={m.id}>
@@ -813,7 +841,7 @@ export function ChatApp({ authed, profile, isAdmin }: { authed: boolean; profile
                         message={m}
                         kbId={selectedKb}
                         onEditSend={m.role === "user" ? editSend : undefined}
-                        onVote={m.role === "assistant" && m.id !== "greeting" ? vote : undefined}
+                        onVote={m.role === "assistant" ? vote : undefined}
                         onCitation={setViewerCitation}
                       />
                       {chips.length > 0 && (

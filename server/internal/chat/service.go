@@ -201,21 +201,6 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID, kbID string, in
 		return nil, errs.Wrap(errs.CodeInternal, "create conversation", err)
 	}
 
-	// If the KB's agent defines an opening message, save it as the first
-	// assistant message so the user sees a greeting when the chat opens.
-	cfg := s.loadAgentConfig(ctx, tenantID, kbID)
-	if cfg.OpeningMessage != "" {
-		if err := s.repo.CreateMsg(&Message{
-			ID:             uuid.NewString(),
-			TenantID:       tenantID,
-			ConversationID: c.ID,
-			Role:           "assistant",
-			Content:        cfg.OpeningMessage,
-		}); err != nil {
-			log.Printf("[chat] save opening message failed tenant=%s conv=%s: %v", tenantID, c.ID, err)
-		}
-	}
-
 	return c, nil
 }
 
