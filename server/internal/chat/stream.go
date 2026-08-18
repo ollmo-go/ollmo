@@ -318,16 +318,26 @@ func (s *Service) runStream(
 	}
 }
 
-// replyAnnotation streams a matched annotation answer: one generate event
-// with the full text, then done. The reply is persisted like any assistant
-// message so history and the left list stay consistent.
+// replyAnnotation streams a matched annotation answer through the same SSE
+// channel as LLM replies, split into token-sized chunks so the frontend
+// renderer (onToken reducer) handles both paths identically.
 func (s *Service) replyAnnotation(ctx context.Context, tenantID string, conv *Conversation, m *annotation.MatchResult, out chan<- StreamReply, start time.Time, provider *llm.LLMModel, query string) {
 	answer := m.Annotation.Answer
 	stats := &ReplyStats{TotalMs: int(time.Since(start).Milliseconds())}
-	if !send(ctx, out, StreamReply{Phase: PhaseGenerate, Token: answer, Annotation: true}) {
-		s.saveAssistant(tenantID, conv.ID, answer, nil, nil, "", true)
-		return
+
+	runes := []rune(answer)
+	const chunkSize = 3
+	for i := 0; i < len(runes); i += chunkSize {
+		end := i + chunkSize
+		if end > len(runes) {
+			end = len(runes)
+		}
+		if !send(ctx, out, StreamReply{Phase: PhaseGenerate, Token: string(runes[i:end]), Annotation: true}) {
+			s.saveAssistant(tenantID, conv.ID, answer, nil, nil, "", true)
+			return
+		}
 	}
+
 	assistantID := s.saveAssistant(tenantID, conv.ID, answer, nil, stats, "", true)
 	send(ctx, out, StreamReply{Phase: PhaseDone, MessageID: assistantID, Stats: stats, Annotation: true})
 	s.emitFollowUps(ctx, provider, tenantID, conv.OwnerID, conv.ID, conv.KbID, assistantID, query, answer, out)
