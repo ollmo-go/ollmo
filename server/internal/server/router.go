@@ -41,7 +41,7 @@ import (
 
 // registerRoutes wires all HTTP routes onto the Fiber app. Domain handlers
 // are constructed here; cross-domain dependencies are passed explicitly.
-func registerRoutes(app *fiber.App, deps *Deps) {
+func registerRoutes(app *fiber.App, deps *Deps, bgCtx context.Context) {
 	// /health is a cheap liveness probe: the process is up and serving.
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return response.OK(c, fiber.Map{"status": "ok", "service": "ollmo-api"})
@@ -537,6 +537,7 @@ func registerRoutes(app *fiber.App, deps *Deps) {
 	// (tenant, kb): one chat turn needs the same agent row twice (execution
 	// config extraction + graph walk) and pays only one DB read + unmarshal.
 	chatSvc := chat.NewService(chat.NewRepo(deps.DB), searchSvc, llmRepo, deps.LLM).
+		WithBackgroundContext(bgCtx).
 		WithAgentConfig(func(ctx context.Context, tenantID, kbID string) (*agent.ExecutionConfig, error) {
 			_, def, err := agentSvc.GetDefinition(ctx, tenantID, kbID)
 			if err != nil || def == nil {

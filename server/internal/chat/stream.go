@@ -61,7 +61,7 @@ func promptBudget(p *llm.LLMModel) int {
 // service's wired collaborators. Called once per stream; the closures capture
 // tenantID/userID/kbID/convID/query from the surrounding scope. ChargeLLM
 // bills classifier/intermediate node calls back to the conversation owner.
-func (s *Service) graphDeps(tenantID, userID, kbID, convID, query string, trackHits bool) agent.ExecutionDeps {
+func (s *Service) graphDeps(tenantID, userID, kbID, convID, query string, trackHits, charge bool) agent.ExecutionDeps {
 	return agent.ExecutionDeps{
 		Search: func(ctx context.Context, tid, kid, q string, topK int, rerank bool, rerankModelID string, useGraph bool) (string, int, float64, string, []any, error) {
 			r, err := s.searchSvc.Search(ctx, tid, kid, search.SearchRequest{
@@ -93,6 +93,9 @@ func (s *Service) graphDeps(tenantID, userID, kbID, convID, query string, trackH
 			if modelID == "" {
 				return
 			}
+			if !charge {
+				return
+			}
 			m, err := s.llmRepo.FindByID(tenantID, modelID)
 			if err != nil {
 				return
@@ -105,7 +108,7 @@ func (s *Service) graphDeps(tenantID, userID, kbID, convID, query string, trackH
 // DebugAgentNode runs one agent node in isolation for the canvas "test this
 // node" action. Nothing is persisted.
 func (s *Service) DebugAgentNode(ctx context.Context, tenantID, kbID string, node agent.Node, query string) (*agent.NodeDebugResult, error) {
-	deps := s.graphDeps(tenantID, "", kbID, "", query, false)
+	deps := s.graphDeps(tenantID, "", kbID, "", query, false, false)
 	return agent.DebugNode(ctx, deps, tenantID, kbID, node, query)
 }
 
@@ -166,11 +169,17 @@ func (s *Service) streamLLM(
 		Stream:          true,
 	}
 
-	// Independent context so the LLM call survives client disconnects.
-	// The stream keeps running for up to 10 min even if the user closes
-	// the browser; output is still saved so the conversation history stays
-	// consistent with what was generated.
-	llmCtx, cancelLLM := context.WithTimeout(context.Background(), 10*time.Minute)
+	// Independent context so the LLM call survives client disconnects: the
+	// stream keeps running even if the user closes the browser, and output
+	// is still saved so history stays consistent with what was generated.
+	// The context derives from the server-lifetime context (not the request)
+	// so a server shutdown still cancels these background streams. The
+	// timeout matches the LLM client's hard cap exactly.
+	base := s.bgCtx
+	if base == nil {
+		base = context.Background()
+	}
+	llmCtx, cancelLLM := context.WithTimeout(base, clients.StreamHardTimeout)
 	defer cancelLLM()
 
 	var sb, rb strings.Builder
@@ -303,11 +312,12 @@ func (s *Service) runStream(
 	content, reasoning, usage, generateMs, streamErr, cancelled := s.streamLLM(ctx, out, provider, cfg, msgs)
 	totalMs := int(time.Since(totalStart).Milliseconds())
 
-	if streamErr != "" {
-		s.saveAssistant(tenantID, conv.ID, content, cits, nil, reasoning, false)
-		return
-	}
 	if cancelled {
+		// Client disconnected mid-stream; the LLM call kept running on an
+		// independent context and finished in the background (cleanly, or
+		// with an error the client never saw). Save the best available
+		// result — full content, stats and billing — so the conversation
+		// record matches what was actually generated.
 		stats := &ReplyStats{
 			RetrieveMs: retrieveMs,
 			GenerateMs: generateMs,
@@ -324,6 +334,10 @@ func (s *Service) runStream(
 		if err := s.repo.TouchConv(tenantID, conv.ID); err != nil {
 			log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, conv.ID, err)
 		}
+		return
+	}
+	if streamErr != "" {
+		s.saveAssistant(tenantID, conv.ID, content, cits, nil, reasoning, false)
 		return
 	}
 	stats := &ReplyStats{
@@ -587,7 +601,7 @@ func (s *Service) runGraph(
 		s.recordExecution(newExecution(tenantID, userID, kbID, convID, query, src, status, answer, messageID, terminal.Type, terminal.Trace, int(time.Since(totalStart).Milliseconds())))
 	}()
 
-	deps := s.graphDeps(tenantID, userID, kbID, convID, query, persist)
+	deps := s.graphDeps(tenantID, userID, kbID, convID, query, persist, persist)
 
 	// Load history for LLM nodes (test mode has no history).
 	var history []*Message
@@ -704,18 +718,12 @@ func (s *Service) runGraph(
 		totalMs := int(time.Since(totalStart).Milliseconds())
 
 		answer = content
-		if streamErr != "" {
-			if persist {
-				s.saveAssistant(tenantID, convID, content, cits, nil, reasoning, false)
-			}
-			status = execution.StatusError
-			return
-		}
 		if cancelled {
-			// Client disconnected mid-stream, but LLM produced the full
-			// answer. Save everything — billing, message row, conv touch —
-			// so the conversation record stays consistent with what was
-			// actually generated.
+			// Client disconnected mid-stream; the LLM call kept running on
+			// an independent context until it ended (cleanly, or with an
+			// error the client never saw). Save everything — billing,
+			// message row, conv touch — so the conversation record matches
+			// what was actually generated.
 			stats := &ReplyStats{
 				RetrieveMs: retrieveMs,
 				GenerateMs: generateMs,
@@ -726,8 +734,8 @@ func (s *Service) runGraph(
 				stats.CompletionTokens = usage.CompletionTokens
 				stats.TotalTokens = usage.TotalTokens
 			}
-			s.recordUsage(tenantID, userID, convID, kbID, bill.SourceChat, llmProvider, usage)
 			if persist {
+				s.recordUsage(tenantID, userID, convID, kbID, bill.SourceChat, llmProvider, usage)
 				assistantID := s.saveAssistant(tenantID, convID, content, cits, stats, reasoning, false)
 				messageID = assistantID
 				s.triggerAutoMemory(tenantID, convID)
@@ -735,7 +743,16 @@ func (s *Service) runGraph(
 					log.Printf("[chat] touch conv failed tenant=%s conv=%s: %v", tenantID, convID, err)
 				}
 			}
-			status = execution.StatusSuccess
+			if strings.TrimSpace(content) != "" {
+				status = execution.StatusSuccess
+			}
+			return
+		}
+		if streamErr != "" {
+			if persist {
+				s.saveAssistant(tenantID, convID, content, cits, nil, reasoning, false)
+			}
+			status = execution.StatusError
 			return
 		}
 		stats := &ReplyStats{
@@ -748,11 +765,11 @@ func (s *Service) runGraph(
 			stats.CompletionTokens = usage.CompletionTokens
 			stats.TotalTokens = usage.TotalTokens
 		}
-		// Charge the terminal LLM node to the conversation owner (test mode
-		// has no persisted conversation; userID is the testing user).
-		s.recordUsage(tenantID, userID, convID, kbID, bill.SourceChat, llmProvider, usage)
 		var assistantID string
 		if persist {
+			// Charge the terminal LLM node to the conversation owner. Test
+			// mode (persist=false) persists nothing, so it is not billed.
+			s.recordUsage(tenantID, userID, convID, kbID, bill.SourceChat, llmProvider, usage)
 			assistantID = s.saveAssistant(tenantID, convID, content, cits, stats, reasoning, false)
 			s.triggerAutoMemory(tenantID, convID)
 			if err := s.repo.TouchConv(tenantID, convID); err != nil {

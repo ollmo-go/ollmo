@@ -3,7 +3,9 @@ package chat
 import (
 	"context"
 	"log"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -75,10 +77,28 @@ type Service struct {
 	execRepo  *execution.Repo
 	billSvc   *bill.Service
 	hub       *Hub
+	// bgCtx is a server-lifetime context used to detach long LLM streams
+	// from request cancellation (client disconnect) while still bounding
+	// them by the server's lifecycle. Nil falls back to context.Background.
+	bgCtx context.Context
 }
+
+// maxConvTitleLen caps conversation titles at both create and rename time.
+// Titles also flow into the markdown export filename, so an unbounded title
+// would let users craft oversized/forged Content-Disposition headers.
+const maxConvTitleLen = 200
 
 func NewService(repo *Repo, searchSvc *search.Service, llmRepo *llm.Repo, llm *clients.LLMClient) *Service {
 	return &Service{repo: repo, searchSvc: searchSvc, llmRepo: llmRepo, llm: llm, history: 30, hub: NewHub()}
+}
+
+// WithBackgroundContext wires a server-lifetime context that outlives any
+// single request. LLM streams that survive client disconnects are derived
+// from it, so shutting the server down cancels them instead of leaving
+// goroutines running after the process is meant to stop.
+func (s *Service) WithBackgroundContext(ctx context.Context) *Service {
+	s.bgCtx = ctx
+	return s
 }
 
 // AnnotationMatcher returns the curated answer when the query closely
@@ -233,6 +253,9 @@ func (s *Service) Search(ctx context.Context, tenantID, ownerID, query string, p
 func (s *Service) Rename(ctx context.Context, tenantID, userID, id, title string) (*Conversation, error) {
 	if title == "" {
 		return nil, errs.BadRequest("title is required")
+	}
+	if utf8.RuneCountInString(title) > maxConvTitleLen {
+		return nil, errs.BadRequest("title is too long (max " + strconv.Itoa(maxConvTitleLen) + " chars)")
 	}
 	conv, err := s.repo.FindConvOwned(tenantID, userID, id)
 	if err != nil {
@@ -392,6 +415,18 @@ func (s *Service) Stream(ctx context.Context, tenantID, userID, convID string, i
 		}
 	}
 
+	// Load the agent config to resolve the LLM provider for this KB.
+	cfg := s.loadAgentConfig(ctx, tenantID, conv.KbID)
+
+	// Resolve LLM provider: agent config's, else tenant default. This is a
+	// read-only step, so it runs before the quota is consumed: a request
+	// that fails before any LLM work (e.g. no provider configured) must not
+	// burn a daily quota unit.
+	provider, err := s.resolveProvider(ctx, tenantID, cfg.LLMModelID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Atomically consume one unit from the daily quota before touching the
 	// LLM: both caps are checked and both counters incremented in a single
 	// Redis operation, so concurrent requests cannot overshoot the limit.
@@ -399,15 +434,6 @@ func (s *Service) Stream(ctx context.Context, tenantID, userID, convID string, i
 		if _, err := s.msgQuota.TryConsumeMessage(tenantID, userID); err != nil {
 			return nil, err
 		}
-	}
-
-	// Load the agent config to resolve the LLM provider for this KB.
-	cfg := s.loadAgentConfig(ctx, tenantID, conv.KbID)
-
-	// Resolve LLM provider: agent config's, else tenant default.
-	provider, err := s.resolveProvider(ctx, tenantID, cfg.LLMModelID)
-	if err != nil {
-		return nil, err
 	}
 
 	// Persist the user message before streaming so the assistant reply can
@@ -465,15 +491,17 @@ func (s *Service) Subscribe(tenantID, userID, convID string) (chan StreamReply, 
 // persisting anything. Used by the agent config test drawer so users can
 // try different prompts/settings without creating throwaway conversations.
 func (s *Service) TestStream(ctx context.Context, tenantID, userID, kbID, query string) (<-chan StreamReply, error) {
+	cfg := s.loadAgentConfig(ctx, tenantID, kbID)
+	// Resolve the provider before consuming quota so a failed resolution
+	// (e.g. no provider configured) does not burn a daily quota unit.
+	provider, err := s.resolveProvider(ctx, tenantID, cfg.LLMModelID)
+	if err != nil {
+		return nil, err
+	}
 	if s.msgQuota != nil {
 		if _, err := s.msgQuota.TryConsumeMessage(tenantID, userID); err != nil {
 			return nil, err
 		}
-	}
-	cfg := s.loadAgentConfig(ctx, tenantID, kbID)
-	provider, err := s.resolveProvider(ctx, tenantID, cfg.LLMModelID)
-	if err != nil {
-		return nil, err
 	}
 	out := make(chan StreamReply, 16)
 	go s.testStream(ctx, tenantID, userID, kbID, query, provider, out, cfg)

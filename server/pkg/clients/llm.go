@@ -22,8 +22,15 @@ type LLMClient struct {
 	http *http.Client
 }
 
+// StreamHardTimeout bounds a single streaming completion. The chat service
+// detaches long streams from the request context (so they can finish after
+// the client disconnects) with this same window, so the detached context and
+// the HTTP client's hard cap stay in sync: a stream is never cut off by the
+// client timeout while its context still has budget left.
+const StreamHardTimeout = 10 * time.Minute
+
 func NewLLM() *LLMClient {
-	return &LLMClient{http: &http.Client{Timeout: 5 * time.Minute}}
+	return &LLMClient{http: &http.Client{Timeout: StreamHardTimeout}}
 }
 
 // ChatMessage is a single role/content pair. ReasoningContent carries the

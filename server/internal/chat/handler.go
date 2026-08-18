@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"log"
+	"mime"
 	"strconv"
 	"strings"
 	"time"
@@ -102,7 +103,10 @@ func (h *Handler) Export(c *fiber.Ctx) error {
 		return response.Fail(c, err)
 	}
 	filename := title + ".md"
-	c.Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	// FormatMediaType quotes/encodes the filename (RFC 2231) so a title
+	// containing quotes, CR/LF or non-ASCII characters cannot break or
+	// inject extra response headers.
+	c.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
 	c.Set("Content-Type", "text/markdown; charset=utf-8")
 	return c.SendString(md)
 }

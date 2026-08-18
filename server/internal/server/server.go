@@ -91,7 +91,14 @@ func RunAPI(cfg *config.Config) error {
 		Expiration: 60 * time.Second,
 	}))
 
-	registerRoutes(app, deps)
+	// Server-lifetime context for work that must survive individual
+	// requests (e.g. LLM streams detached from disconnected clients).
+	// Cancelled on shutdown so background streams stop within the grace
+	// period instead of outliving the process.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+
+	registerRoutes(app, deps, bgCtx)
 
 	// Graceful shutdown: wait for SIGINT/SIGTERM, then drain in-flight
 	// requests for up to 30s before forcing the server to stop.
