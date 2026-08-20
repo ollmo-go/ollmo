@@ -49,19 +49,22 @@ ollmo converges everything into three steps: **upload documents, ask questions, 
 
 - **Hybrid Retrieval** — Dense vectors on Milvus + lexical matching via MySQL FULLTEXT, fused with RRF, with KB-level rerank configuration; built-in retrieval testing with an adjustable keyword ↔ semantic weight slider.
 - **Multi-Tenancy** — Logical isolation across MySQL, Milvus, and MinIO; every table carries `tenant_id`.
-- **Document Pipeline** — Upload (drag & drop, paste, multi-file) → parse (MinerU / local parser) → chunk → embed → index, fully async via Asynq + Redis.
-- **Streaming Chat** — Real-time SSE streaming with source citations. Doubao-style greeting from agent opening message.
+- **Document Pipeline** — Upload (drag & drop, paste, multi-file, or URL import) → parse (MinerU / local parser) → chunk (paragraph, token, header-aware, Q&A, parent-child) → embed → index, fully async via Asynq + Redis.
+- **Streaming Chat** — Real-time SSE streaming with source citations, follow-up suggestions, and multi-device stream sync. A client disconnect never loses the reply: the LLM stream is detached from the request and keeps running server-side, saving the completed answer (and billing) even if the tab is closed. DeepSeek-style greeting: a centered empty state with the agent's opening message and a date-grouped conversation list.
 - **Citation Tracing** — Clicking a citation opens the source document with the cited passage highlighted in place: PDF rendering, paginated parsed view, and a side-by-side chat + document panel.
+- **Answer Feedback** — Up/down vote on any answer; downvotes flow into the analytics "bad-case review" list and deep-link straight into the execution replay for debugging.
 - **Annotation Q&A** — Curated question/answer pairs per KB matched by embedding similarity; a close match answers verbatim, keeping high-frequency answers consistent.
-- **Auto-Memory** — Long conversations are automatically summarized in the background (async LLM task); summaries are injected into later sessions for cross-conversation continuity. Toggleable site-wide.
-- **Personal Center** — Click your name in the chat sidebar to open the personal center: profile info, password change, and "My Usage" (personal message quota, token consumption, estimated cost, and recent call records) — members can track their own usage without entering the console.
+- **Auto-Memory** — Long conversations are automatically summarized in the background (async LLM task); summaries are injected into later sessions for cross-conversation continuity. Toggleable site-wide, with a per-KB memory page to review and delete summaries.
+- **Personal Center** — Click your avatar in the bottom-left account card menu to open the personal center: profile info, password change, and "My Usage" (personal message quota, token consumption, estimated cost, and recent call records) — members can track their own usage without entering the console.
 - **Agent Canvas** — Visual agent pipeline (React Flow): intent classification → retrieval → condition branch → LLM → direct reply. Node outputs are referenceable variables (`{node.output}`) in prompts and conditions, enabling LLM chaining and generic branching; per-node debug shows output variables, and nodes highlight live during execution. In-canvas undo/redo and sticky notes. Per-KB system prompt, temperature, top_k, rerank toggle, opening message, and LLM selection.
+- **Execution Replay** — Every agent run (real chats and test-drawer runs) is recorded with a node-by-node trace and replayable on a read-only canvas; conversation messages and analytics feedback deep-link into the replay for debugging and tuning.
 - **Ingestion Pipeline Canvas** — Visual ingestion DAG (React Flow): source → parser → chunker → embedder → sink, with configurable parsing options, chunking strategy, and batch size.
+- **KB Backup & Restore** — Export a knowledge base (metadata, documents, chunks) to a JSON file and import it back into any KB; embeddings are rebuilt automatically by re-indexing after import.
 - **GraphRAG** — LLM-powered entity & relation extraction at ingestion; entity matching enriches retrieval context at query time.
-- **Configurable Models** — Tenant-level LLM / Embedding / Rerank provider management via web UI, with per-KB overrides. Two-column popup selector (provider list on left, models on right) for intuitive model switching. Selection priority: KB config → tenant default → config.yaml.
+- **Configurable Models** — Tenant-level LLM / Embedding / Rerank provider management via web UI, with per-KB overrides. Two-column popup selector (provider list on left, models on right) for intuitive model switching. Each model row has collapsible capacity settings for max output tokens and billing unit prices (¥ per 1M tokens); unsaved draft models can be tested before saving. Selection priority: KB config → tenant default → config.yaml.
 - **Usage & Cost** — Team-level token/cost accounting: overview, per-user and per-model totals, and raw call records. Every LLM invocation (main reply, agent classifier/intermediate nodes, follow-up suggestions) is charged automatically; visible to admins only.
 - **Team & Access Control** — Invitation-based membership with admin / member roles and per-user daily message quotas. Clean role separation: admins manage knowledge bases, models, and team data in the console, while members focus on chatting; KBs are either private or team-shared.
-- **Admin Console** — Super-admin user management, tenant management with plan & quota control (free / pro / enterprise), system settings (registration toggle, auto-memory), analytics dashboard, and audit logging.
+- **Admin Console** — Super-admin user management, tenant management with plan & quota control (free / pro / enterprise), system settings (registration toggle, auto-memory, custom site logo), analytics dashboard, and audit logging.
 - **External API** — API-key authenticated programmatic access (search, KB management, streaming chat); keys are created and managed by admins.
 - **Internationalization** — Chinese / English UI with server-side message contracts. No locale in URL paths.
 
@@ -116,19 +119,24 @@ ollmo/
 │   ├── internal/           # Business domains (one package per domain)
 │   │   ├── agent/          # Agent canvas config & execution
 │   │   ├── analytics/      # Usage statistics & activity feed
+│   │   ├── annotation/     # Annotation Q&A pairs (curated standard answers)
 │   │   ├── apikey/         # API key management & middleware
 │   │   ├── audit/          # Audit logging
 │   │   ├── auth/           # Authentication (email + password + JWT)
+│   │   ├── backup/         # KB export/import (JSON backup & restore)
 │   │   ├── bill/           # Usage & cost accounting (token/cost records)
 │   │   ├── chat/           # Streaming chat with citations
 │   │   ├── doc/            # Document lifecycle, chunking, worker
 │   │   ├── embedding/      # Embedding model management
+│   │   ├── execution/      # Agent run traces & replay
 │   │   ├── graph/          # GraphRAG (entity extraction & retrieval)
+│   │   ├── install/        # First-run install wizard
 │   │   ├── invitation/     # Team invitation system
 │   │   ├── kb/             # Knowledge base CRUD
 │   │   ├── llm/            # LLM model management
 │   │   ├── memory/         # Auto-summarization & cross-session context
 │   │   ├── pipeline/       # Ingestion pipeline canvas config
+│   │   ├── provider/       # Unified model provider cards (LLM/embedding/rerank)
 │   │   ├── rerank/         # Rerank model management
 │   │   ├── search/         # Hybrid retrieval (dense + lexical + rerank)
 │   │   ├── site/           # Site-wide settings
@@ -264,7 +272,7 @@ make clean         # Remove build artifacts
 - [x] **Phase 1 — MVP**: KB/document CRUD, document parsing, embedding, hybrid retrieval, streaming chat with citation, local auth + tenant isolation.
 - [x] **Phase 2 — Configurability**: Multi LLM/Embedding/Rerank providers, KB editing with re-indexing, rerank, multi chunking strategies, drag & drop upload, i18n.
 - [x] **Phase 3 — Intelligence**: Ingestion Pipeline canvas (React Flow), GraphRAG, Agent canvas, Memory, role-based access control, external API, team management.
-- [x] **Phase 4 — Production Readiness**: Analytics dashboard, usage & cost (billing), audit logging, conversation management (search / rename / export / pin), auto-memory summarization, personal center, annotation Q&A, super-admin console (users, tenants, plans & quotas, system settings), registration toggle.
+- [x] **Phase 4 — Production Readiness**: Analytics dashboard, usage & cost (billing), audit logging, conversation management (search / rename / export / pin), auto-memory summarization, personal center, annotation Q&A, super-admin console (users, tenants, plans & quotas, system settings), registration toggle, KB backup & restore, execution replay, answer feedback.
 - [ ] **Phase 5 — Document Intelligence**:
 
   ### 5.1 Document Preview & Citation Tracing ✅
