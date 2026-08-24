@@ -12,7 +12,6 @@ import (
 	"ollmo/ollmo/pkg/clients"
 	"ollmo/ollmo/pkg/crypto"
 	"ollmo/ollmo/pkg/errs"
-	"ollmo/ollmo/pkg/vector"
 )
 
 // Embedder abstracts the embedding call so doc/search can use either the
@@ -67,15 +66,10 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID string, in Creat
 	if err := clients.ValidateEndpoint(in.Endpoint); err != nil {
 		return nil, errs.BadRequest(err.Error())
 	}
-	dim := vector.EmbeddingDim(in.Model)
-	if dim == 0 {
-		// Unknown model — probe the endpoint to detect the real dimension.
-		cli := clients.NewEmbedding(in.Endpoint, in.APIKey)
-		detected, err := cli.DetectDim(ctx, in.Model)
-		if err != nil {
-			return nil, errs.BadRequest(fmt.Sprintf("cannot detect embedding dimension for model %q: %v", in.Model, err))
-		}
-		dim = detected
+	cli := clients.NewEmbedding(in.Endpoint, in.APIKey)
+	dim, err := cli.DetectDim(ctx, in.Model)
+	if err != nil {
+		return nil, errs.BadRequest(fmt.Sprintf("cannot detect embedding dimension for model %q: %v", in.Model, err))
 	}
 	p := &EmbeddingModel{
 		ID:        uuid.NewString(),
@@ -147,14 +141,10 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInpu
 		p.APIKey = *in.APIKey
 	}
 	if in.Model != nil {
-		dim := vector.EmbeddingDim(*in.Model)
-		if dim == 0 {
-			cli := clients.NewEmbedding(p.Endpoint, p.APIKey)
-			detected, err := cli.DetectDim(ctx, *in.Model)
-			if err != nil {
-				return nil, errs.BadRequest(fmt.Sprintf("cannot detect embedding dimension for model %q: %v", *in.Model, err))
-			}
-			dim = detected
+		cli := clients.NewEmbedding(p.Endpoint, p.APIKey)
+		dim, err := cli.DetectDim(ctx, *in.Model)
+		if err != nil {
+			return nil, errs.BadRequest(fmt.Sprintf("cannot detect embedding dimension for model %q: %v", *in.Model, err))
 		}
 		p.Model = *in.Model
 		p.Dim = dim

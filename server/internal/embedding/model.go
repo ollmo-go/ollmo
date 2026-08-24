@@ -8,8 +8,8 @@ const (
 )
 
 // EmbeddingModel is a tenant-scoped embedding model configuration. Endpoint
-// and APIKey are OpenAI-compatible /v1/embeddings. Dim is auto-derived from
-// the model name via vector.EmbeddingDim at creation time. ProviderID groups
+// and APIKey are OpenAI-compatible /v1/embeddings. Dim is detected at creation
+// time by probing the endpoint with a single-word request. ProviderID groups
 // rows under a settings provider card; endpoint/api_key stay duplicated on
 // the row so the call path needs no join.
 type EmbeddingModel struct {

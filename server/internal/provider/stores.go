@@ -9,7 +9,6 @@ import (
 	"ollmo/ollmo/internal/llm"
 	"ollmo/ollmo/internal/rerank"
 	"ollmo/ollmo/pkg/clients"
-	"ollmo/ollmo/pkg/vector"
 )
 
 // ModelRef is the provider-agnostic view of one model row bound to a card.
@@ -122,14 +121,10 @@ type EmbeddingStore struct{ repo *embedding.Repo }
 func NewEmbeddingStore(repo *embedding.Repo) *EmbeddingStore { return &EmbeddingStore{repo: repo} }
 
 func (s *EmbeddingStore) CreateModel(tenantID, ownerID, providerID string, pv *Provider, in ModelInput) (ModelRef, error) {
-	dim := vector.EmbeddingDim(in.Model)
-	if dim == 0 {
-		cli := clients.NewEmbedding(pv.Endpoint, pv.APIKey)
-		detected, err := cli.DetectDim(context.Background(), in.Model)
-		if err != nil {
-			return ModelRef{}, fmt.Errorf("cannot detect embedding dimension for model %q: %w", in.Model, err)
-		}
-		dim = detected
+	cli := clients.NewEmbedding(pv.Endpoint, pv.APIKey)
+	dim, err := cli.DetectDim(context.Background(), in.Model)
+	if err != nil {
+		return ModelRef{}, fmt.Errorf("cannot detect embedding dimension for model %q: %w", in.Model, err)
 	}
 	_, fdErr := s.repo.FindDefault(tenantID)
 	isDefault := fdErr != nil

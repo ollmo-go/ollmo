@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
@@ -53,35 +52,6 @@ func CollectionName(kbID string) string {
 // embeddings for a KB (annotation reply matching).
 func AnnCollectionName(kbID string) string {
 	return "ann_" + sanitize(kbID)
-}
-
-// EmbeddingDim returns the vector dimension for a well-known model name.
-// Returns 0 for unknown models — callers should fall back to API detection
-// (EmbeddingClient.DetectDim) in that case. The org prefix (e.g. "BAAI/" on
-// SiliconFlow) is stripped before matching so both "bge-large-zh-v1.5" and
-// "BAAI/bge-large-zh-v1.5" resolve the same.
-func EmbeddingDim(model string) int {
-	if idx := strings.LastIndex(model, "/"); idx >= 0 {
-		model = model[idx+1:]
-	}
-	switch strings.ToLower(model) {
-	case "bge-large-zh-v1.5", "bge-large-en-v1.5", "bge-m3":
-		return 1024
-	case "bge-base-zh-v1.5", "bge-base-en-v1.5":
-		return 768
-	case "bge-small-zh-v1.5", "bge-small-en-v1.5":
-		return 512
-	case "text-embedding-3-small":
-		return 1536
-	case "text-embedding-3-large":
-		return 3072
-	case "embedding-3": // Zhipu embedding-3 default output dim
-		return 2048
-	case "text-embedding-v4": // Alibaba Qwen3-Embedding default dim
-		return 1024
-	default:
-		return 0
-	}
 }
 
 // EnsureCollection creates the KB chunk collection + HNSW index if missing
