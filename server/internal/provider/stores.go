@@ -1,11 +1,14 @@
 package provider
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
 	"ollmo/ollmo/internal/embedding"
 	"ollmo/ollmo/internal/llm"
 	"ollmo/ollmo/internal/rerank"
+	"ollmo/ollmo/pkg/clients"
 	"ollmo/ollmo/pkg/vector"
 )
 
@@ -119,9 +122,14 @@ type EmbeddingStore struct{ repo *embedding.Repo }
 func NewEmbeddingStore(repo *embedding.Repo) *EmbeddingStore { return &EmbeddingStore{repo: repo} }
 
 func (s *EmbeddingStore) CreateModel(tenantID, ownerID, providerID string, pv *Provider, in ModelInput) (ModelRef, error) {
-	dim, err := vector.EmbeddingDim(in.Model)
-	if err != nil {
-		return ModelRef{}, err
+	dim := vector.EmbeddingDim(in.Model)
+	if dim == 0 {
+		cli := clients.NewEmbedding(pv.Endpoint, pv.APIKey)
+		detected, err := cli.DetectDim(context.Background(), in.Model)
+		if err != nil {
+			return ModelRef{}, fmt.Errorf("cannot detect embedding dimension for model %q: %w", in.Model, err)
+		}
+		dim = detected
 	}
 	_, fdErr := s.repo.FindDefault(tenantID)
 	isDefault := fdErr != nil

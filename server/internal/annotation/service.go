@@ -63,7 +63,7 @@ func (s *Service) Create(ctx context.Context, tenantID, kbID string, in CreateIn
 	if in.Question == "" || in.Answer == "" {
 		return nil, errs.BadRequest("question and answer are required")
 	}
-	modelName, err := s.requireEmbedding(ctx, tenantID, kbID)
+	modelName, dim, err := s.requireEmbedding(ctx, tenantID, kbID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (s *Service) Create(ctx context.Context, tenantID, kbID string, in CreateIn
 		return nil, err
 	}
 	if a.Enabled {
-		if err := s.syncVectors(ctx, tenantID, kbID, modelName, []*Annotation{a}); err != nil {
+		if err := s.syncVectors(ctx, tenantID, kbID, modelName, dim, []*Annotation{a}); err != nil {
 			return nil, err
 		}
 	}
@@ -124,11 +124,11 @@ func (s *Service) Update(ctx context.Context, tenantID, kbID, id string, in Upda
 	questionChanged := in.Question != nil
 	if questionChanged || in.Enabled != nil {
 		if updated.Enabled {
-			modelName, err := s.requireEmbedding(ctx, tenantID, kbID)
+			modelName, dim, err := s.requireEmbedding(ctx, tenantID, kbID)
 			if err != nil {
 				return nil, err
 			}
-			if err := s.syncVectors(ctx, tenantID, kbID, modelName, []*Annotation{updated}); err != nil {
+			if err := s.syncVectors(ctx, tenantID, kbID, modelName, dim, []*Annotation{updated}); err != nil {
 				return nil, err
 			}
 		} else if s.store != nil {
@@ -170,7 +170,7 @@ func (s *Service) Match(ctx context.Context, tenantID, kbID, query string) *Matc
 	if err != nil || k.EmbeddingModelID == "" {
 		return nil
 	}
-	modelName, _, err := s.embedder.ResolveModel(ctx, tenantID, k.EmbeddingModelID)
+	modelName, _, _, err := s.embedder.ResolveModel(ctx, tenantID, k.EmbeddingModelID)
 	if err != nil {
 		return nil
 	}
@@ -224,7 +224,7 @@ func (s *Service) SyncOnEmbeddingChange(ctx context.Context, tenantID, kbID stri
 	if len(items) == 0 {
 		return nil
 	}
-	modelName, err := s.requireEmbedding(ctx, tenantID, kbID)
+	modelName, dim, err := s.requireEmbedding(ctx, tenantID, kbID)
 	if err != nil {
 		return err
 	}
@@ -233,34 +233,34 @@ func (s *Service) SyncOnEmbeddingChange(ctx context.Context, tenantID, kbID stri
 		if end > len(items) {
 			end = len(items)
 		}
-		if err := s.syncVectors(ctx, tenantID, kbID, modelName, items[i:end]); err != nil {
+		if err := s.syncVectors(ctx, tenantID, kbID, modelName, dim, items[i:end]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// requireEmbedding resolves the KB's embedding model name, failing with a
-// clear message when the KB has none configured (annotations are useless
-// without an embedding model).
-func (s *Service) requireEmbedding(ctx context.Context, tenantID, kbID string) (string, error) {
+// requireEmbedding resolves the KB's embedding model name and dimension,
+// failing with a clear message when the KB has none configured (annotations
+// are useless without an embedding model).
+func (s *Service) requireEmbedding(ctx context.Context, tenantID, kbID string) (modelName string, dim int, err error) {
 	k, err := s.kbRepo.FindByID(tenantID, kbID)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if k.EmbeddingModelID == "" {
-		return "", errs.BadRequest("knowledge base has no embedding model; configure one before adding annotations")
+		return "", 0, errs.BadRequest("knowledge base has no embedding model; configure one before adding annotations")
 	}
-	modelName, _, err := s.embedder.ResolveModel(ctx, tenantID, k.EmbeddingModelID)
+	modelName, dim, _, err = s.embedder.ResolveModel(ctx, tenantID, k.EmbeddingModelID)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return modelName, nil
+	return modelName, dim, nil
 }
 
 // syncVectors embeds the questions and upserts them into the annotation
 // collection, creating it on first use.
-func (s *Service) syncVectors(ctx context.Context, tenantID, kbID, modelName string, items []*Annotation) error {
+func (s *Service) syncVectors(ctx context.Context, tenantID, kbID, modelName string, dim int, items []*Annotation) error {
 	inputs := make([]string, 0, len(items))
 	for _, a := range items {
 		inputs = append(inputs, a.Question)
@@ -279,7 +279,7 @@ func (s *Service) syncVectors(ctx context.Context, tenantID, kbID, modelName str
 			Content: a.Question, Embedding: vecs[i],
 		})
 	}
-	if err := s.store.EnsureAnnotationCollection(ctx, kbID, modelName); err != nil {
+	if err := s.store.EnsureAnnotationCollection(ctx, kbID, dim); err != nil {
 		return err
 	}
 	_, err = s.store.UpsertAnnotation(ctx, kbID, records)

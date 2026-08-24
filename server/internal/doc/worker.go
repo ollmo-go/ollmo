@@ -320,9 +320,9 @@ func (w *Worker) HandleEmbed(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 	pc := w.loadPipelineConfig(ctx, p.TenantID, p.KbID, kbCfg)
-	// The KB pins an embedding model by id; resolve it to the model name
-	// expected by EnsureCollection/Embed and the provider's batch size.
-	model, embBatch, err := w.embedder.ResolveModel(ctx, p.TenantID, kbCfg.EmbeddingModelID)
+	// The KB pins an embedding model by id; resolve it to the model name,
+	// vector dimension, and the provider's batch size.
+	model, dim, embBatch, err := w.embedder.ResolveModel(ctx, p.TenantID, kbCfg.EmbeddingModelID)
 	if err != nil {
 		w.markFailedAndLog(p.TenantID, p.DocID, "resolve embedding: "+err.Error())
 		return fmt.Errorf("resolve embedding: %w", err)
@@ -335,7 +335,7 @@ func (w *Worker) HandleEmbed(ctx context.Context, t *asynq.Task) error {
 		batchSize = w.embedder.ResolveBatchSize(ctx, p.TenantID, model)
 	}
 
-	if err := w.store.EnsureCollection(ctx, p.KbID, model); err != nil {
+	if err := w.store.EnsureCollection(ctx, p.KbID, dim); err != nil {
 		w.markFailedAndLog(p.TenantID, p.DocID, "ensure collection: "+err.Error())
 		return fmt.Errorf("ensure collection: %w", err)
 	}

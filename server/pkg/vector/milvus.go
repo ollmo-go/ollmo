@@ -55,59 +55,60 @@ func AnnCollectionName(kbID string) string {
 	return "ann_" + sanitize(kbID)
 }
 
-// EmbeddingDim returns the vector dimension for a model name. Unknown models
-// must fail loudly so KB creation does not silently pick a wrong dim. The
-// org prefix (e.g. "BAAI/" on SiliconFlow) is stripped before matching so
-// both "bge-large-zh-v1.5" and "BAAI/bge-large-zh-v1.5" resolve the same.
-func EmbeddingDim(model string) (int, error) {
+// EmbeddingDim returns the vector dimension for a well-known model name.
+// Returns 0 for unknown models — callers should fall back to API detection
+// (EmbeddingClient.DetectDim) in that case. The org prefix (e.g. "BAAI/" on
+// SiliconFlow) is stripped before matching so both "bge-large-zh-v1.5" and
+// "BAAI/bge-large-zh-v1.5" resolve the same.
+func EmbeddingDim(model string) int {
 	if idx := strings.LastIndex(model, "/"); idx >= 0 {
 		model = model[idx+1:]
 	}
 	switch strings.ToLower(model) {
 	case "bge-large-zh-v1.5", "bge-large-en-v1.5", "bge-m3":
-		return 1024, nil
+		return 1024
 	case "bge-base-zh-v1.5", "bge-base-en-v1.5":
-		return 768, nil
+		return 768
 	case "bge-small-zh-v1.5", "bge-small-en-v1.5":
-		return 512, nil
+		return 512
 	case "text-embedding-3-small":
-		return 1536, nil
+		return 1536
 	case "text-embedding-3-large":
-		return 3072, nil
+		return 3072
 	case "embedding-3": // Zhipu embedding-3 default output dim
-		return 2048, nil
+		return 2048
+	case "text-embedding-v4": // Alibaba Qwen3-Embedding default dim
+		return 1024
 	default:
-		return 0, fmt.Errorf("unknown embedding model %q: add its dim to vector.EmbeddingDim", model)
+		return 0
 	}
 }
 
 // EnsureCollection creates the KB chunk collection + HNSW index if missing
 // and loads it. Idempotent; safe to call on every upsert. The same KB always
 // maps to the same dim, so re-creation never collides.
-func (s *Store) EnsureCollection(ctx context.Context, kbID, embeddingModel string) error {
-	return s.ensureNamed(ctx, CollectionName(kbID), embeddingModel)
+func (s *Store) EnsureCollection(ctx context.Context, kbID string, dim int) error {
+	return s.ensureNamed(ctx, CollectionName(kbID), dim)
 }
 
 // EnsureAnnotationCollection ensures the collection for annotation question
 // embeddings of a KB. Same schema as the chunk collection; doc_id stays empty.
-func (s *Store) EnsureAnnotationCollection(ctx context.Context, kbID, embeddingModel string) error {
-	return s.ensureNamed(ctx, AnnCollectionName(kbID), embeddingModel)
+func (s *Store) EnsureAnnotationCollection(ctx context.Context, kbID string, dim int) error {
+	return s.ensureNamed(ctx, AnnCollectionName(kbID), dim)
 }
 
 // ensureNamed creates a collection with the shared chunk schema if missing,
 // creates the HNSW index, and loads it. Safe to call repeatedly.
-func (s *Store) ensureNamed(ctx context.Context, coll, embeddingModel string) error {
+func (s *Store) ensureNamed(ctx context.Context, coll string, dim int) error {
+	if dim <= 0 {
+		return fmt.Errorf("invalid embedding dimension %d for collection %q", dim, coll)
+	}
 	s.mu.Lock()
 	if s.ensured[coll] {
 		s.mu.Unlock()
 		return nil
 	}
 	s.mu.Unlock()
-
-	dim, err := EmbeddingDim(embeddingModel)
-	if err != nil {
-		return err
-	}
 
 	has, err := s.cli.HasCollection(ctx, coll)
 	if err != nil {

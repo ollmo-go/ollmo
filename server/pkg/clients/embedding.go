@@ -41,6 +41,20 @@ type embeddingResponse struct {
 	} `json:"data"`
 }
 
+// DetectDim sends a single-word probe to the embedding endpoint and returns
+// the vector dimension from the response. This lets the system support any
+// OpenAI-compatible embedding model without hard-coding dimensions.
+func (c *EmbeddingClient) DetectDim(ctx context.Context, model string) (int, error) {
+	vecs, err := c.Embed(ctx, model, []string{"probe"})
+	if err != nil {
+		return 0, err
+	}
+	if len(vecs) == 0 || len(vecs[0]) == 0 {
+		return 0, fmt.Errorf("embedding returned empty vector for model %q", model)
+	}
+	return len(vecs[0]), nil
+}
+
 // Embed returns one vector per input text, preserving order. Batch size is
 // controlled by the caller; this method does not chunk further.
 func (c *EmbeddingClient) Embed(ctx context.Context, model string, inputs []string) ([][]float32, error) {

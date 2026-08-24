@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -21,9 +22,9 @@ type Embedder interface {
 	Embed(ctx context.Context, tenantID, model string, inputs []string) ([][]float32, error)
 	ResolveBatchSize(ctx context.Context, tenantID, model string) int
 	// ResolveModel translates a KB's pinned embedding_model_id into the model
-	// name expected by Embed/EnsureCollection and the provider's batch size.
+	// name, vector dimension, and the provider's batch size.
 	// Used by doc/search to bridge the id reference to the runtime model name.
-	ResolveModel(ctx context.Context, tenantID, id string) (model string, batchSize int, err error)
+	ResolveModel(ctx context.Context, tenantID, id string) (model string, dim, batchSize int, err error)
 }
 
 type Service struct {
@@ -66,9 +67,15 @@ func (s *Service) Create(ctx context.Context, tenantID, ownerID string, in Creat
 	if err := clients.ValidateEndpoint(in.Endpoint); err != nil {
 		return nil, errs.BadRequest(err.Error())
 	}
-	dim, err := vector.EmbeddingDim(in.Model)
-	if err != nil {
-		return nil, errs.BadRequest(err.Error())
+	dim := vector.EmbeddingDim(in.Model)
+	if dim == 0 {
+		// Unknown model — probe the endpoint to detect the real dimension.
+		cli := clients.NewEmbedding(in.Endpoint, in.APIKey)
+		detected, err := cli.DetectDim(ctx, in.Model)
+		if err != nil {
+			return nil, errs.BadRequest(fmt.Sprintf("cannot detect embedding dimension for model %q: %v", in.Model, err))
+		}
+		dim = detected
 	}
 	p := &EmbeddingModel{
 		ID:        uuid.NewString(),
@@ -140,9 +147,14 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, in UpdateInpu
 		p.APIKey = *in.APIKey
 	}
 	if in.Model != nil {
-		dim, err := vector.EmbeddingDim(*in.Model)
-		if err != nil {
-			return nil, errs.BadRequest(err.Error())
+		dim := vector.EmbeddingDim(*in.Model)
+		if dim == 0 {
+			cli := clients.NewEmbedding(p.Endpoint, p.APIKey)
+			detected, err := cli.DetectDim(ctx, *in.Model)
+			if err != nil {
+				return nil, errs.BadRequest(fmt.Sprintf("cannot detect embedding dimension for model %q: %v", *in.Model, err))
+			}
+			dim = detected
 		}
 		p.Model = *in.Model
 		p.Dim = dim
@@ -236,16 +248,16 @@ func (r *Resolver) ResolveBatchSize(ctx context.Context, tenantID, model string)
 }
 
 // ResolveModel looks up a KB's pinned embedding model by id and returns the
-// model name (for Embed/EnsureCollection) and the provider's batch size.
-func (r *Resolver) ResolveModel(ctx context.Context, tenantID, id string) (string, int, error) {
+// model name, vector dimension, and the provider's batch size.
+func (r *Resolver) ResolveModel(ctx context.Context, tenantID, id string) (string, int, int, error) {
 	if r.repo == nil {
-		return "", 0, errs.Internal("embedding repo not configured")
+		return "", 0, 0, errs.Internal("embedding repo not configured")
 	}
 	p, err := r.repo.FindByID(tenantID, id)
 	if err != nil {
-		return "", 0, err
+		return "", 0, 0, err
 	}
-	return p.Model, p.BatchSize, nil
+	return p.Model, p.Dim, p.BatchSize, nil
 }
 
 func (r *Resolver) resolve(ctx context.Context, tenantID, model string) (*clients.EmbeddingClient, string, int) {

@@ -44,7 +44,7 @@ func (s *Service) denseSearch(ctx context.Context, tenantID, kbID string, req Se
 	if err != nil {
 		return nil, err
 	}
-	model, _, err := s.embedder.ResolveModel(ctx, tenantID, kbCfg.EmbeddingModelID)
+	model, _, _, err := s.embedder.ResolveModel(ctx, tenantID, kbCfg.EmbeddingModelID)
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, "resolve embedding model", err)
 	}

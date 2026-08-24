@@ -723,7 +723,7 @@ func (s *Service) UpdateChunkContent(ctx context.Context, tenantID, kbID, chunkI
 	if s.embedder != nil && s.store != nil {
 		kbCfg, err := s.kbRepo.FindByID(tenantID, chunk.KbID)
 		if err == nil {
-			model, _, err := s.embedder.ResolveModel(ctx, tenantID, kbCfg.EmbeddingModelID)
+			model, _, _, err := s.embedder.ResolveModel(ctx, tenantID, kbCfg.EmbeddingModelID)
 			if err != nil {
 				return nil, errs.Wrap(errs.CodeInternal, "resolve embedding model", err)
 			}
